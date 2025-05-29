@@ -83,3 +83,16 @@ export interface GregorianDate {
   gm: number;
   gd: number;
 }
+
+// Authentication Types
+export interface PasswordActivationInfo {
+  activatedAt: number; // Timestamp of first activation
+  user: string;        // User identifier (e.g., "User 01")
+}
+
+export type PasswordActivations = Record<string, PasswordActivationInfo>;
+
+export interface ActiveSession {
+  password: string; // The password used for the current session
+  user: string;     // The user identifier for the current session
+}

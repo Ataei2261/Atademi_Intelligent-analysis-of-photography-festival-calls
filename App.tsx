@@ -1,13 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { FestivalsProvider, useFestivals } from './contexts/FestivalsContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FileUploadArea } from './components/FileUploadArea';
 import { FestivalList } from './components/FestivalList';
 import { CalendarView } from './components/CalendarView';
 import { APP_TITLE } from './constants';
-import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, UserCircle, LogOut, ShieldCheck } from 'lucide-react';
 import { FestivalInfo } from './types';
-import { parseJalaliDate, toGregorian, jalaaliMonthLength, jalaaliToday } from './utils/dateConverter';
+import { parseJalaliDate, toGregorian } from './utils/dateConverter';
+import { PasswordModal } from './components/PasswordModal';
+import { LoadingSpinner } from './components/LoadingSpinner';
 
 enum View {
   Upload = 'upload',
@@ -17,16 +20,39 @@ enum View {
 
 function App() {
   return (
-    <FestivalsProvider>
-      <AppContentWrapper />
-    </FestivalsProvider>
+    <AuthProvider>
+      <FestivalsProvider>
+        <AppShell />
+      </FestivalsProvider>
+    </AuthProvider>
   );
 }
 
+const AppShell: React.FC = () => {
+  const { isAuthenticated, isLoadingAuth } = useAuth();
+
+  if (isLoadingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center justify-center" dir="rtl">
+        <LoadingSpinner size="12" color="text-teal-600 dark:text-teal-400" />
+        <p className="mt-4 text-lg text-gray-700 dark:text-gray-300">در حال بارگذاری برنامه...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <PasswordModal />;
+  }
+
+  return <AppContentWrapper />;
+};
+
+
 const AppContentWrapper: React.FC = () => {
   const { festivals, storageError } = useFestivals();
-  const [criticalDeadlines, setCriticalDeadlines] = useState<FestivalInfo[]>([]); // For < 24 hours (Red Box)
-  const [upcomingNonCriticalDeadlines, setUpcomingNonCriticalDeadlines] = useState<FestivalInfo[]>([]); // For 24-48 hours (Yellow Box)
+  const { authenticatedUser, logout } = useAuth();
+  const [criticalDeadlines, setCriticalDeadlines] = useState<FestivalInfo[]>([]);
+  const [upcomingNonCriticalDeadlines, setUpcomingNonCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [currentView, setCurrentView] = useState<View>(View.Upload);
 
   useEffect(() => {
@@ -120,7 +146,6 @@ const AppContentWrapper: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center" dir="rtl">
-      {/* Sticky Header and Nav Wrapper */}
       <div className="w-full sticky top-0 z-40 backdrop-blur-lg bg-slate-100/80 dark:bg-slate-900/80 shadow-sm">
         <div className="max-w-5xl mx-auto px-4"> 
           <header className="w-full pt-3 pb-2 text-center">
@@ -129,31 +154,46 @@ const AppContentWrapper: React.FC = () => {
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               مدیریت فراخوان‌ها؛ تحلیل و انتخاب عکس با توجه به اهداف جشنواره
             </p>
+             {authenticatedUser && (
+              <div className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center justify-center">
+                <ShieldCheck size={14} className="me-1" />
+                وارد شده با: {authenticatedUser}
+              </div>
+            )}
           </header>
-          <nav className="w-full max-w-3xl mx-auto bg-white/40 dark:bg-slate-700/40 shadow-md rounded-lg p-2 mb-3 flex justify-around">
-            <button
-              onClick={() => setCurrentView(View.Upload)}
-              className={`flex items-center px-4 py-2 rounded-md transition-colors duration-200 ease-in-out ${currentView === View.Upload ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
-            >
-              <UploadCloud className="me-2 h-5 w-5" /> بارگذاری جدید
+
+          <div className="w-full max-w-3xl mx-auto bg-white/40 dark:bg-slate-700/40 shadow-md rounded-lg p-2 mb-3 flex justify-between items-center">
+            <nav className="flex justify-start space-s-2 sm:space-s-3">
+              <button
+                onClick={() => setCurrentView(View.Upload)}
+                className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.Upload ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
+              >
+                <UploadCloud className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> بارگذاری
+              </button>
+              <button
+                onClick={() => setCurrentView(View.List)}
+                className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.List ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
+              >
+                <ListChecks className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> لیست
+              </button>
+              <button
+                onClick={() => setCurrentView(View.Calendar)}
+                className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.Calendar ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
+              >
+                <CalendarDays className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> تقویم
+              </button>
+            </nav>
+             <button
+                onClick={logout}
+                title={`خروج کاربر ${authenticatedUser}`}
+                className="flex items-center px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
+                <LogOut size={16} className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> خروج
             </button>
-            <button
-              onClick={() => setCurrentView(View.List)}
-              className={`flex items-center px-4 py-2 rounded-md transition-colors duration-200 ease-in-out ${currentView === View.List ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
-            >
-              <ListChecks className="me-2 h-5 w-5" /> لیست فراخوان‌ها
-            </button>
-            <button
-              onClick={() => setCurrentView(View.Calendar)}
-              className={`flex items-center px-4 py-2 rounded-md transition-colors duration-200 ease-in-out ${currentView === View.Calendar ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
-            >
-              <CalendarDays className="me-2 h-5 w-5" /> تقویم شمسی
-            </button>
-          </nav>
+          </div>
         </div>
       </div>
       
-      {/* Scrollable Content Area */}
       <div className="w-full max-w-5xl mx-auto px-4 py-4 flex-grow">
         {criticalDeadlines.length > 0 && (
           <div className="w-full max-w-3xl mx-auto p-4 my-4 bg-red-100 border-r-4 border-red-600 text-red-700 rounded-md shadow-lg animate-blink">
