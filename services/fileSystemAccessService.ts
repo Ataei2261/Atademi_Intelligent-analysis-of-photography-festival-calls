@@ -185,3 +185,40 @@ export async function loadFestivalsFromFileSystem(): Promise<FileSystemAccessRes
     return { success: false, message: `خطا در بارگذاری فایل: ${error.message}` };
   }
 }
+
+export async function readJsonFromFile(file: File): Promise<FileSystemAccessResult<FestivalInfo[]>> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const contents = event.target?.result as string;
+        if (!contents) {
+          throw new Error('فایل خالی است یا قابل خواندن نیست.');
+        }
+        const parsedData = JSON.parse(contents);
+
+        if (!Array.isArray(parsedData)) {
+          throw new Error('فایل انتخاب شده شامل آرایه‌ای از اطلاعات فراخوان‌ها نیست.');
+        }
+        // Basic validation for FestivalInfo structure
+        const isValidData = parsedData.every(
+          item => typeof item === 'object' && item !== null && 'id' in item && ('festivalName' in item || 'fileName' in item)
+        );
+        if (!isValidData) {
+          throw new Error('ساختار داده‌های داخل فایل نامعتبر است. لطفاً مطمئن شوید فایل پشتیبان صحیح را انتخاب کرده‌اید.');
+        }
+        resolve({ success: true, message: `اطلاعات از فایل "${file.name}" با موفقیت بارگذاری و پردازش شد.`, data: parsedData as FestivalInfo[] });
+      } catch (error: any) {
+        console.error('Error reading or parsing JSON from file:', error);
+        resolve({ success: false, message: `خطا در خواندن یا پردازش فایل JSON: ${error.message}` });
+      }
+    };
+    reader.onerror = (eventError) => { // eventError is ProgressEvent<FileReader>
+      console.error('FileReader error event:', eventError);
+      // The actual error is in reader.error
+      const errorMessage = reader.error?.message || 'Unknown FileReader error';
+      resolve({ success: false, message: `خطا در خواندن فایل: ${errorMessage}` });
+    };
+    reader.readAsText(file, 'UTF-8'); // Specify UTF-8 encoding
+  });
+}

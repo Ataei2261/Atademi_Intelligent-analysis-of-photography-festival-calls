@@ -1,10 +1,9 @@
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalInfo, ExtractedData, FestivalSourceFile } from '../types';
 import { extractTextFromPdf, fileToBase64 } from '../services/fileProcessingService';
 import { extractTextFromImageViaGemini, extractFestivalInfoFromTextViaGemini } from '../services/geminiService';
-import { UploadCloud, FileText, Type, AlertCircle, CheckCircle, X, Image as ImageIcon, AlertTriangle, Edit2 } from 'lucide-react';
+import { UploadCloud, FileText, Type, AlertCircle, CheckCircle, X, Image as ImageIcon, AlertTriangle, Edit2, XCircle } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { FestivalModal } from './FestivalModal';
 
@@ -30,6 +29,10 @@ export const FileUploadArea: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [initialModalData, setInitialModalData] = useState<Partial<FestivalInfo> | null>(null);
 
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const currentOperationAbortControllerRef = useRef<AbortController | null>(null);
+
+
   const resetInputState = () => {
     setSelectedFiles([]);
     setFilePreviews([]);
@@ -38,9 +41,21 @@ export const FileUploadArea: React.FC = () => {
     setError(null);
     setProcessingMessage(null);
     setProcessingWarning(null);
+    if (currentOperationAbortControllerRef.current) {
+        currentOperationAbortControllerRef.current.abort();
+        currentOperationAbortControllerRef.current = null;
+    }
     const fileInput = document.getElementById('file-upload') as HTMLInputElement;
     if (fileInput) fileInput.value = '';
   };
+  
+  const handleCancelProcessing = () => {
+    if (currentOperationAbortControllerRef.current) {
+      currentOperationAbortControllerRef.current.abort();
+      setProcessingMessage("عملیات در حال لغو شدن...");
+    }
+  };
+
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     // Clear previous general error/processing messages and text input
@@ -48,6 +63,11 @@ export const FileUploadArea: React.FC = () => {
     setProcessingMessage(null);
     setProcessingWarning(null);
     setTextInput(''); // Clear text input as file input takes precedence
+    if (currentOperationAbortControllerRef.current) {
+        currentOperationAbortControllerRef.current.abort();
+        currentOperationAbortControllerRef.current = null;
+    }
+
 
     const files = event.target.files;
     const currentFileInput = event.target;
@@ -114,13 +134,17 @@ export const FileUploadArea: React.FC = () => {
     setError(null); 
     setProcessingMessage(null);
     setProcessingWarning(null);
+    if (currentOperationAbortControllerRef.current) {
+        currentOperationAbortControllerRef.current.abort();
+        currentOperationAbortControllerRef.current = null;
+    }
     const fileInput = document.getElementById('file-upload') as HTMLInputElement;
     if (fileInput) fileInput.value = ''; // Clear the actual file input element
 
     setTextInput(event.target.value);
   };
 
-  const _actuallyProcessData = async (data: string, source: 'file' | 'text', originalFileNameForText?: string) => {
+  const _actuallyProcessData = async (data: string, source: 'file' | 'text', signal: AbortSignal, originalFileNameForText?: string) => {
     setIsLoading(true);
     setError(null);
     setProcessingWarning(null);
@@ -131,8 +155,12 @@ export const FileUploadArea: React.FC = () => {
         ? (selectedFiles.length > 1 ? `${selectedFiles[0].name} (+${selectedFiles.length - 1} تصویر دیگر)` : selectedFiles[0].name)
         : (originalFileNameForText || "متن ورودی کاربر.txt");
 
-      const structuredInfo: ExtractedData = await extractFestivalInfoFromTextViaGemini(data, festivalInfoFileName);
+      const structuredInfo: ExtractedData = await extractFestivalInfoFromTextViaGemini(data, festivalInfoFileName, signal);
       
+      if (signal.aborted) {
+        throw new DOMException('Operation aborted by user after Gemini extraction', 'AbortError');
+      }
+
       let newFestival: Partial<FestivalInfo> = {
         id: crypto.randomUUID(),
         extractedText: data,
@@ -169,16 +197,22 @@ export const FileUploadArea: React.FC = () => {
 
     } catch (err: any) {
       console.error("Error processing data with Gemini:", err);
-      let displayError = `خطا در پردازش اطلاعات: ${err.message}`;
-      if (err.message && typeof err.message === 'string' && 
-          (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
-          (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
-        displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+      if (err.name === 'AbortError') {
+        setError('عملیات پردازش توسط کاربر لغو شد.');
+        setProcessingMessage(null);
+      } else {
+        let displayError = `خطا در پردازش اطلاعات: ${err.message}`;
+        if (err.message && typeof err.message === 'string' && 
+            (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
+            (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
+          displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+        }
+        setError(displayError);
+        setProcessingMessage(null);
       }
-      setError(displayError);
-      setProcessingMessage(null);
     } finally {
       setIsLoading(false);
+      currentOperationAbortControllerRef.current = null;
     }
   };
 
@@ -188,6 +222,10 @@ export const FileUploadArea: React.FC = () => {
       setError('لطفاً ابتدا یک یا چند فایل را انتخاب کنید.');
       return;
     }
+    
+    const controller = new AbortController();
+    currentOperationAbortControllerRef.current = controller;
+
 
     setIsLoading(true);
     setError(null);
@@ -200,15 +238,17 @@ export const FileUploadArea: React.FC = () => {
       if (pdfPreview && selectedFiles.length === 1) {
         const pdfFile = selectedFiles[0];
         setProcessingMessage('در حال استخراج متن از PDF...');
-        extractedText = await extractTextFromPdf(pdfFile);
+        extractedText = await extractTextFromPdf(pdfFile); // PDF extraction itself doesn't support AbortSignal easily
+        if (controller.signal.aborted) throw new DOMException('Operation aborted during PDF processing', 'AbortError');
       } else if (filePreviews.length > 0 && selectedFiles.length > 0) {
         setProcessingMessage(`در حال استخراج متن از ${selectedFiles.length} تصویر با Gemini...`);
         const allTexts: string[] = [];
         for (let i = 0; i < selectedFiles.length; i++) {
+          if (controller.signal.aborted) throw new DOMException('Operation aborted during image loop', 'AbortError');
           const imageFile = selectedFiles[i];
           const base64PreviewDataUrl = filePreviews[i];
           const base64DataForGemini = base64PreviewDataUrl.split(',')[1];
-          const textFromOneImage = await extractTextFromImageViaGemini(base64DataForGemini, imageFile.type);
+          const textFromOneImage = await extractTextFromImageViaGemini(base64DataForGemini, imageFile.type, controller.signal);
           allTexts.push(textFromOneImage);
         }
         extractedText = allTexts.join('\n\n--- متن تصویر بعدی ---\n\n');
@@ -221,31 +261,40 @@ export const FileUploadArea: React.FC = () => {
           });
           setIsLoading(false);
           setProcessingMessage(null);
+          currentOperationAbortControllerRef.current = null;
           return;
         }
       } else {
         throw new Error('نوع فایل پشتیبانی نمی‌شود یا فایلی انتخاب نشده.');
       }
       
+      if (controller.signal.aborted) throw new DOMException('Operation aborted before final processing', 'AbortError');
+
       if (!extractedText || extractedText.trim().length === 0) {
         if (pdfPreview) {
           throw new Error('متنی از فایل PDF استخراج نشد. ممکن است خالی باشد یا متن قابل تشخیصی نداشته باشد.');
         }
       }
       
-      await _actuallyProcessData(extractedText, 'file');
+      await _actuallyProcessData(extractedText, 'file', controller.signal);
 
     } catch (err: any) {
       console.error("Error processing file(s):", err);
-      let displayError = `خطا در پردازش فایل(ها): ${err.message}`;
-      if (err.message && typeof err.message === 'string' && 
-          (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
-          (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
-        displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+      if (err.name === 'AbortError') {
+        setError('عملیات پردازش توسط کاربر لغو شد.');
+        setProcessingMessage(null);
+      } else {
+        let displayError = `خطا در پردازش فایل(ها): ${err.message}`;
+        if (err.message && typeof err.message === 'string' && 
+            (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
+            (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
+          displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+        }
+        setError(displayError);
+        setProcessingMessage(null);
       }
-      setError(displayError);
-      setProcessingMessage(null);
       setIsLoading(false);
+      currentOperationAbortControllerRef.current = null;
     }
   }, [selectedFiles, filePreviews, pdfPreview, setIsLoading]);
 
@@ -255,6 +304,9 @@ export const FileUploadArea: React.FC = () => {
       setError('لطفاً ابتدا متنی را وارد کنید.');
       return;
     }
+    
+    const controller = new AbortController();
+    currentOperationAbortControllerRef.current = controller;
 
     setIsLoading(true);
     setError(null);
@@ -267,16 +319,19 @@ export const FileUploadArea: React.FC = () => {
         dataToProcess: textInput 
       });
       setIsLoading(false);
+      currentOperationAbortControllerRef.current = null;
       return;
     }
     
-    await _actuallyProcessData(textInput, 'text');
+    await _actuallyProcessData(textInput, 'text', controller.signal);
 
   }, [textInput, setIsLoading]);
 
   const handleProceedWithWarning = () => {
     if (processingWarning?.dataToProcess !== undefined) {
-      _actuallyProcessData(processingWarning.dataToProcess, processingWarning.type === 'shortImageText' ? 'file' : 'text', "متن ورودی کاربر (کوتاه).txt");
+      const controller = new AbortController();
+      currentOperationAbortControllerRef.current = controller;
+      _actuallyProcessData(processingWarning.dataToProcess, processingWarning.type === 'shortImageText' ? 'file' : 'text', controller.signal, "متن ورودی کاربر (کوتاه).txt");
     }
     setProcessingWarning(null);
   };
@@ -311,8 +366,10 @@ export const FileUploadArea: React.FC = () => {
           <div className="mb-6">
             <label htmlFor="file-upload" className="cursor-pointer group">
               <div className={`w-full h-40 border-2 border-dashed rounded-lg flex flex-col justify-center items-center transition-colors group-hover:border-teal-500 group-hover:bg-teal-50 ${pdfPreview || filePreviews.length > 0 ? 'border-teal-400 bg-teal-50' : 'border-gray-300'}`}>
-                {isLoading && selectedFiles.length > 0 ? (
-                  <LoadingSpinner size="8" />
+                {isLoading && selectedFiles.length > 0 && processingMessage ? (
+                   <div className="flex flex-col items-center text-teal-600">
+                    <LoadingSpinner size="8" />
+                  </div>
                 ) : pdfPreview ? (
                     <FileText className="h-16 w-16 text-red-500 mb-2" />
                 ) : filePreviews.length > 0 ? (
@@ -370,7 +427,7 @@ export const FileUploadArea: React.FC = () => {
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md flex items-center text-sm">
           <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" /> 
           <span className="flex-grow">{error}</span>
-           <button onClick={() => setError(null)} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0">
+           <button onClick={() => { setError(null); if(isLoading) {handleCancelProcessing();} }} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0">
             <X size={18} />
           </button>
         </div>
@@ -385,7 +442,15 @@ export const FileUploadArea: React.FC = () => {
       )}
        {isLoading && processingMessage && !processingWarning && (
         <div className="mb-4 p-3 bg-blue-100 text-blue-700 rounded-md flex items-center text-sm">
-          <LoadingSpinner size="5" className="me-2"/> {processingMessage}
+          <LoadingSpinner size="5" className="me-2"/> 
+          <span className="flex-grow">{processingMessage}</span>
+           <button 
+              onClick={handleCancelProcessing} 
+              className="ms-2 px-2 py-0.5 bg-red-500 text-white text-xs rounded hover:bg-red-600 flex items-center"
+              title="لغو عملیات"
+            >
+              <XCircle size={14} className="me-1" /> لغو
+            </button>
         </div>
       )}
 

@@ -1,15 +1,15 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalCard } from './FestivalCard';
 import { FestivalModal } from './FestivalModal';
 import { FestivalInfo } from '../types';
-import { Search, Calendar as CalendarIcon, Download as DownloadIconLucide, Save, FolderOpen, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Search, Calendar as CalendarIcon, Download as DownloadIconLucide, Save, FolderOpen, AlertTriangle, CheckCircle, Upload } from 'lucide-react'; // Added Upload
 import { PERSIAN_MONTH_NAMES_WITH_ALL } from '../constants';
 import { parseJalaliDate, toJalaali, formatJalaliDate, jalaaliToday, formatGregorianDate, toGregorian } from '../utils/dateConverter';
 import JSZip from 'jszip';
 import { LoadingSpinner } from './LoadingSpinner';
-import { canUseFileSystemAccessApi, saveFestivalsToFileSystem, loadFestivalsFromFileSystem, FileSystemAccessResult } from '../services/fileSystemAccessService';
+import { canUseFileSystemAccessApi, saveFestivalsToFileSystem, loadFestivalsFromFileSystem, readJsonFromFile, FileSystemAccessResult } from '../services/fileSystemAccessService';
 
 
 export const FestivalList: React.FC = () => {
@@ -23,6 +23,8 @@ export const FestivalList: React.FC = () => {
   const [isFileApiAvailable, setIsFileApiAvailable] = useState(false);
   const [fileOperationLoading, setFileOperationLoading] = useState(false);
   const [fileOpMessage, setFileOpMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const mobileUploadInputRef = useRef<HTMLInputElement>(null);
+
 
   useEffect(() => {
     setIsFileApiAvailable(canUseFileSystemAccessApi());
@@ -325,6 +327,65 @@ export const FestivalList: React.FC = () => {
     }
     setFileOperationLoading(false);
   };
+  
+  const handleDownloadBackupJson = () => {
+    if (festivals.length === 0) {
+      setFileOpMessage({ type: 'error', text: 'هیچ اطلاعاتی برای دانلود وجود ندارد.' });
+      setTimeout(() => setFileOpMessage(null), 3000);
+      return;
+    }
+    setFileOperationLoading(true);
+    setFileOpMessage(null);
+    try {
+      const jsonString = JSON.stringify(festivals, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      const today = jalaaliToday();
+      link.download = `festivals_backup_${today.jy}-${String(today.jm).padStart(2, '0')}-${String(today.jd).padStart(2, '0')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(href);
+      setFileOpMessage({ type: 'success', text: 'فایل پشتیبان با موفقیت آماده دانلود شد.' });
+    } catch (error: any) {
+      console.error('Error creating JSON backup:', error);
+      setFileOpMessage({ type: 'error', text: `خطا در ایجاد فایل پشتیبان JSON: ${error.message}` });
+    } finally {
+      setFileOperationLoading(false);
+      setTimeout(() => setFileOpMessage(null), 3000);
+    }
+  };
+
+  const handleUploadBackupJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const confirmation = window.confirm(
+      "بارگذاری اطلاعات از فایل، تمام اطلاعات فعلی موجود در برنامه را پاک کرده و با اطلاعات فایل جایگزین می‌کند. آیا مطمئن هستید؟"
+    );
+    if (!confirmation) {
+      if (mobileUploadInputRef.current) mobileUploadInputRef.current.value = '';
+      return;
+    }
+
+    setFileOperationLoading(true);
+    setFileOpMessage(null);
+    
+    const result = await readJsonFromFile(file);
+
+    if (result.success && result.data) {
+      replaceAllFestivals(result.data);
+      setFileOpMessage({ type: 'success', text: result.message });
+    } else {
+      setFileOpMessage({ type: 'error', text: result.message });
+    }
+    setFileOperationLoading(false);
+    if (mobileUploadInputRef.current) mobileUploadInputRef.current.value = ''; // Reset file input
+    setTimeout(() => setFileOpMessage(null), 5000);
+  };
+
 
   const filteredFestivals = useMemo(() => {
     let festivalsToDisplay = [...festivals];
@@ -392,26 +453,61 @@ export const FestivalList: React.FC = () => {
         <div className="w-full">
             <h2 className="text-3xl font-semibold text-teal-700 mb-6 text-center">لیست فراخوان‌های عکاسی</h2>
              <div className="mb-6 p-4 bg-white rounded-lg shadow-md flex flex-col sm:flex-row gap-4 items-center justify-center">
-                <button
-                  onClick={handleSaveDataToSystem}
-                  disabled={!isFileApiAvailable || fileOperationLoading || festivals.length === 0}
-                  className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-                  title={!isFileApiAvailable ? "مرورگر شما از این قابلیت پشتیبانی نمی‌کند" : (festivals.length === 0 ? "هیچ اطلاعاتی برای ذخیره وجود ندارد" : "ذخیره کلیه اطلاعات روی سیستم")}
-                >
-                  {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
-                  <Save size={18} className="me-2" />
-                  ذخیره اطلاعات روی سیستم
-                </button>
-                <button
-                  onClick={handleLoadDataFromSystem}
-                  disabled={!isFileApiAvailable || fileOperationLoading}
-                  className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-                  title={!isFileApiAvailable ? "مرورگر شما از این قابلیت پشتیبانی نمی‌کند" : "بارگذاری اطلاعات از فایل پشتیبان"}
-                >
-                  {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
-                  <FolderOpen size={18} className="me-2" />
-                  بارگذاری اطلاعات از سیستم
-                </button>
+                {isFileApiAvailable ? (
+                  <>
+                    <button
+                      onClick={handleSaveDataToSystem}
+                      disabled={fileOperationLoading || festivals.length === 0}
+                      className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                      title={festivals.length === 0 ? "هیچ اطلاعاتی برای ذخیره وجود ندارد" : "ذخیره کلیه اطلاعات روی سیستم"}
+                    >
+                      {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+                      <Save size={18} className="me-2" />
+                      ذخیره اطلاعات روی سیستم
+                    </button>
+                    <button
+                      onClick={handleLoadDataFromSystem}
+                      disabled={fileOperationLoading}
+                      className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                      title="بارگذاری اطلاعات از فایل پشتیبان"
+                    >
+                      {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+                      <FolderOpen size={18} className="me-2" />
+                      بارگذاری اطلاعات از سیستم
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleDownloadBackupJson}
+                      disabled={fileOperationLoading || festivals.length === 0}
+                      className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                      title={festivals.length === 0 ? "هیچ اطلاعاتی برای دانلود وجود ندارد" : "دانلود فایل پشتیبان JSON"}
+                    >
+                      {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+                      <DownloadIconLucide size={18} className="me-2" />
+                      دانلود پشتیبان (JSON)
+                    </button>
+                    <label
+                      htmlFor="upload-backup-input"
+                      className={`w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors flex items-center justify-center cursor-pointer ${fileOperationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title="بارگذاری پشتیبان از فایل JSON"
+                    >
+                       {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+                      <Upload size={18} className="me-2" />
+                      بارگذاری پشتیبان (JSON)
+                    </label>
+                    <input
+                      type="file"
+                      id="upload-backup-input"
+                      ref={mobileUploadInputRef}
+                      className="hidden"
+                      accept=".json,application/json"
+                      onChange={handleUploadBackupJson}
+                      disabled={fileOperationLoading}
+                    />
+                  </>
+                )}
             </div>
             {fileOpMessage && (
               <div className={`p-3 my-4 rounded-md text-sm text-center ${fileOpMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -484,26 +580,61 @@ export const FestivalList: React.FC = () => {
       </div>
 
       <div className="mb-6 p-4 bg-white rounded-lg shadow-md flex flex-col sm:flex-row gap-4 items-center justify-center">
-          <button
-            onClick={handleSaveDataToSystem}
-            disabled={!isFileApiAvailable || fileOperationLoading || festivals.length === 0}
-            className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-            title={!isFileApiAvailable ? "مرورگر شما از این قابلیت پشتیبانی نمی‌کند" : (festivals.length === 0 ? "هیچ اطلاعاتی برای ذخیره وجود ندارد" : "ذخیره کلیه اطلاعات روی سیستم")}
-          >
-            {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
-            <Save size={18} className="me-2" />
-            ذخیره اطلاعات روی سیستم
-          </button>
-          <button
-            onClick={handleLoadDataFromSystem}
-            disabled={!isFileApiAvailable || fileOperationLoading}
-            className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-            title={!isFileApiAvailable ? "مرورگر شما از این قابلیت پشتیبانی نمی‌کند" : "بارگذاری اطلاعات از فایل پشتیبان"}
-          >
-            {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
-            <FolderOpen size={18} className="me-2" />
-            بارگذاری اطلاعات از سیستم
-          </button>
+        {isFileApiAvailable ? (
+          <>
+            <button
+              onClick={handleSaveDataToSystem}
+              disabled={fileOperationLoading || festivals.length === 0}
+              className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+              title={festivals.length === 0 ? "هیچ اطلاعاتی برای ذخیره وجود ندارد" : "ذخیره کلیه اطلاعات روی سیستم"}
+            >
+              {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+              <Save size={18} className="me-2" />
+              ذخیره اطلاعات روی سیستم
+            </button>
+            <button
+              onClick={handleLoadDataFromSystem}
+              disabled={fileOperationLoading}
+              className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+              title="بارگذاری اطلاعات از فایل پشتیبان"
+            >
+              {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+              <FolderOpen size={18} className="me-2" />
+              بارگذاری اطلاعات از سیستم
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={handleDownloadBackupJson}
+              disabled={fileOperationLoading || festivals.length === 0}
+              className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+              title={festivals.length === 0 ? "هیچ اطلاعاتی برای دانلود وجود ندارد" : "دانلود فایل پشتیبان JSON"}
+            >
+              {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+              <DownloadIconLucide size={18} className="me-2" />
+              دانلود پشتیبان (JSON)
+            </button>
+            <label
+              htmlFor="upload-backup-input"
+              className={`w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors flex items-center justify-center cursor-pointer ${fileOperationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title="بارگذاری پشتیبان از فایل JSON"
+            >
+               {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+              <Upload size={18} className="me-2" />
+              بارگذاری پشتیبان (JSON)
+            </label>
+            <input
+              type="file"
+              id="upload-backup-input"
+              ref={mobileUploadInputRef}
+              className="hidden"
+              accept=".json,application/json"
+              onChange={handleUploadBackupJson}
+              disabled={fileOperationLoading}
+            />
+          </>
+        )}
       </div>
        {fileOpMessage && (
         <div className={`p-3 mb-4 rounded-md text-sm text-center ${fileOpMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>

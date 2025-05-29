@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, GenerateContentResponse, Part, GroundingChunk } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Part, GroundingChunk, AbortSignal } from "@google/genai";
 import { GEMINI_MODEL_TEXT, GEMINI_MODEL_VISION } from '../constants';
 import { ExtractedData, FestivalInfo } from "../types";
 import { normalizeSubmissionUrl } from '../utils/urlUtils'; 
@@ -41,9 +40,12 @@ const cleanJsonString = (jsonStr: string): string => {
   return cleaned;
 };
 
-export async function extractTextFromImageViaGemini(base64ImageData: string, mimeType: string): Promise<string> {
+export async function extractTextFromImageViaGemini(base64ImageData: string, mimeType: string, signal?: AbortSignal): Promise<string> {
   if (!ai) {
     throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
+  if (signal?.aborted) {
+    throw new DOMException('Operation aborted by user', 'AbortError');
   }
   
   const imagePart: Part = {
@@ -61,17 +63,24 @@ export async function extractTextFromImageViaGemini(base64ImageData: string, mim
       model: GEMINI_MODEL_VISION, // Use a model that supports vision
       contents: { parts: [imagePart, textPart] },
     });
+    if (signal?.aborted) {
+      throw new DOMException('Operation aborted by user post-API call', 'AbortError');
+    }
     return response.text.trim();
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     console.error("Error extracting text from image via Gemini:", error);
     throw new Error(`Gemini API error during image text extraction: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 
-export async function extractFestivalInfoFromTextViaGemini(text: string, fileName: string): Promise<ExtractedData> {
+export async function extractFestivalInfoFromTextViaGemini(text: string, fileName: string, signal?: AbortSignal): Promise<ExtractedData> {
   if (!ai) {
     throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
+   if (signal?.aborted) {
+    throw new DOMException('Operation aborted by user', 'AbortError');
   }
 
   const prompt = `
@@ -137,6 +146,10 @@ Example JSON output:
         }
     });
     
+    if (signal?.aborted) {
+      throw new DOMException('Operation aborted by user post-API call', 'AbortError');
+    }
+
     apiResponseText = response.text;
     const jsonString = cleanJsonString(apiResponseText);
     
@@ -178,6 +191,7 @@ Example JSON output:
     return parsedData;
 
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     console.error("Error extracting festival info via Gemini:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (errorMessage.includes("quota") || errorMessage.includes("API key")) {
@@ -200,12 +214,16 @@ export async function getSmartFestivalAnalysisViaGemini(
   festivalName: string | undefined,
   topics: string[] | undefined,
   objectives: string | undefined,
-  userNotesForSmartAnalysis?: string
+  userNotesForSmartAnalysis?: string,
+  signal?: AbortSignal
 ): Promise<{ analysisText: string; sourceUrls: { uri: string; title: string }[] }> {
   if (!ai) {
     throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
   }
   if (!festivalName) throw new Error("Festival name is required for smart analysis.");
+  if (signal?.aborted) {
+    throw new DOMException('Operation aborted by user', 'AbortError');
+  }
 
   const topicsString = topics && topics.length > 0 ? topics.join(', ') : 'نامشخص';
   const objectivesString = objectives || 'نامشخص';
@@ -275,6 +293,9 @@ ${userNotesSection}
         tools: [{ googleSearch: {} }], 
       },
     });
+    if (signal?.aborted) {
+      throw new DOMException('Operation aborted by user post-API call', 'AbortError');
+    }
 
     const analysisText = response.text.trim();
     let sourceUrls: { uri: string; title: string }[] = [];
@@ -293,6 +314,7 @@ ${userNotesSection}
     return { analysisText, sourceUrls: uniqueSourceUrls };
 
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     console.error("Error getting smart festival analysis via Gemini:", error);
     throw new Error(`Gemini API error during smart analysis: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -318,12 +340,16 @@ interface FestivalContextForImageAnalysis {
 export async function analyzeImageForFestivalViaGemini(
   base64ImageData: string,
   mimeType: string,
-  festivalInfo: FestivalContextForImageAnalysis
+  festivalInfo: FestivalContextForImageAnalysis,
+  signal?: AbortSignal
 ): Promise<ImageAnalysisPayload> {
   if (!ai) {
     throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
   }
   if (!festivalInfo.smartAnalysisText) throw new Error("Smart festival analysis text is required to analyze the image.");
+  if (signal?.aborted) {
+    throw new DOMException('Operation aborted by user', 'AbortError');
+  }
 
   const imagePart: Part = {
     inlineData: {
@@ -430,6 +456,9 @@ Return your response as a **single, valid JSON object (یک شیء JSON واحد
         responseMimeType: "application/json",
       },
     });
+    if (signal?.aborted) {
+      throw new DOMException('Operation aborted by user post-API call', 'AbortError');
+    }
 
     const jsonString = cleanJsonString(geminiApiResponse.text);
     const parsedData = JSON.parse(jsonString) as ImageAnalysisPayload;
@@ -448,6 +477,7 @@ Return your response as a **single, valid JSON object (یک شیء JSON واحد
     return parsedData;
 
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     console.error("Error analyzing image for festival via Gemini:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
      if (error instanceof SyntaxError) {

@@ -6,7 +6,7 @@ import { FileUploadArea } from './components/FileUploadArea';
 import { FestivalList } from './components/FestivalList';
 import { CalendarView } from './components/CalendarView';
 import { APP_TITLE } from './constants';
-import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, UserCircle, LogOut, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, UserCircle, LogOut, ShieldCheck, Clock } from 'lucide-react'; // Added Clock
 import { FestivalInfo } from './types';
 import { parseJalaliDate, toGregorian } from './utils/dateConverter';
 import { PasswordModal } from './components/PasswordModal';
@@ -50,10 +50,11 @@ const AppShell: React.FC = () => {
 
 const AppContentWrapper: React.FC = () => {
   const { festivals, storageError } = useFestivals();
-  const { authenticatedUser, logout } = useAuth();
+  const { authenticatedUser, logout, sessionExpiryTimestamp, isAuthenticated } = useAuth(); // Added sessionExpiryTimestamp, isAuthenticated
   const [criticalDeadlines, setCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [upcomingNonCriticalDeadlines, setUpcomingNonCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [currentView, setCurrentView] = useState<View>(View.Upload);
+  const [timeLeftDisplay, setTimeLeftDisplay] = useState<string>(''); // For countdown timer
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -143,6 +144,51 @@ const AppContentWrapper: React.FC = () => {
     checkAndSetDeadlines(festivals);
   }, [festivals]);
 
+  // Countdown timer effect
+  useEffect(() => {
+    if (!isAuthenticated || !sessionExpiryTimestamp) {
+      setTimeLeftDisplay('');
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      const now = Date.now();
+      const timeLeft = sessionExpiryTimestamp - now;
+
+      if (timeLeft <= 0) {
+        setTimeLeftDisplay("منقضی شده");
+        clearInterval(intervalId);
+        // Optional: Call logout() or trigger a re-validation if AuthContext doesn't auto-handle this on next interaction
+        // For now, AuthContext handles actual expiry check on interaction or reload.
+      } else {
+        const totalSeconds = Math.floor(timeLeft / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        setTimeLeftDisplay(
+          `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+        );
+      }
+    }, 1000);
+
+    // Initial call to set time immediately
+    const initialTimeLeft = sessionExpiryTimestamp - Date.now();
+     if (initialTimeLeft <= 0) {
+        setTimeLeftDisplay("منقضی شده");
+        clearInterval(intervalId);
+      } else {
+        const totalSeconds = Math.floor(initialTimeLeft / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        setTimeLeftDisplay(
+          `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+        );
+      }
+
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated, sessionExpiryTimestamp]);
+
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center" dir="rtl">
@@ -158,6 +204,12 @@ const AppContentWrapper: React.FC = () => {
               <div className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center justify-center">
                 <ShieldCheck size={14} className="me-1" />
                 وارد شده با: {authenticatedUser}
+              </div>
+            )}
+            {timeLeftDisplay && (
+              <div className="mt-1 text-xs text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <Clock size={14} className="me-1" />
+                زمان باقی‌مانده: {timeLeftDisplay}
               </div>
             )}
           </header>

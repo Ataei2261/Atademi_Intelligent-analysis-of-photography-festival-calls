@@ -86,13 +86,14 @@ export interface GregorianDate {
 
 // Authentication Types
 export interface PasswordActivationInfo {
-  activatedAt: number; // Timestamp of first activation
-  user: string;        // User identifier (e.g., "User 01")
+  activatedAt: number; // Timestamp of when the password was first activated
+  activatedBy: string; // User identifier who activated it
 }
 
 export type PasswordActivations = Record<string, PasswordActivationInfo>;
 
 export interface ActiveSession {
-  password: string; // The password used for the current session
-  user: string;     // The user identifier for the current session
+  password: string;       // The password used for the current session
+  user: string;           // The user identifier for the current session
+  sessionStartedAt: number; // Timestamp of when this specific session started
 }

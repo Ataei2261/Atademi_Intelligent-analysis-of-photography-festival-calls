@@ -1,3 +1,4 @@
+
 export const APP_TITLE = "دستیار هوشمند فراخوان‌های عکاسی";
 export const GEMINI_MODEL_TEXT = "gemini-2.5-flash-preview-04-17";
 export const GEMINI_MODEL_VISION = "gemini-2.5-flash-preview-04-17"; // Or specific vision model if different and better for OCR

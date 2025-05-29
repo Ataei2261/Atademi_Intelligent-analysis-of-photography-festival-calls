@@ -1,7 +1,6 @@
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { FestivalInfo, FestivalImageAnalysis } from '../types';
-import { Calendar, Edit, Trash2, FileText, Tag, Clock, Image as LucideImage, Link as LinkIcon, Maximize, ChevronDown, ChevronUp, Target, Download, Brain, Zap, ExternalLink, AlertCircle, UploadCloud, CameraOff, Info as InfoIcon, Star, ListChecks, Layers, MessageSquare, Edit3, FilePlus } from 'lucide-react';
+import { Calendar, Edit, Trash2, FileText, Tag, Clock, Image as LucideImage, Link as LinkIcon, Maximize, ChevronDown, ChevronUp, Target, Download, Brain, Zap, ExternalLink, AlertCircle, UploadCloud, CameraOff, Info as InfoIcon, Star, ListChecks, Layers, MessageSquare, Edit3, FilePlus, XCircle } from 'lucide-react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { formatJalaliDate, parseJalaliDate, toGregorian, toJalaali } from '../utils/dateConverter';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -31,6 +30,9 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
   const [imageAnalysisError, setImageAnalysisError] = useState<string | null>(null);
   const [selectedAnalysisTopic, setSelectedAnalysisTopic] = useState<string>("تحلیل کلی بر اساس تمام موارد");
 
+  const smartAnalysisAbortControllerRef = useRef<AbortController | null>(null);
+  const imageAnalysisAbortControllerRef = useRef<AbortController | null>(null);
+
 
   const toggleOpen = (event: React.MouseEvent<HTMLDivElement>) => {
     const targetElement = event.target as HTMLElement;
@@ -46,6 +48,12 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
     e.stopPropagation();
     if (festival.isAnalyzing || festival.smartAnalysis) return;
 
+    if (smartAnalysisAbortControllerRef.current) {
+        smartAnalysisAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    smartAnalysisAbortControllerRef.current = controller;
+
     const festivalToUpdate: FestivalInfo = { ...festival, isAnalyzing: true, analysisError: undefined };
     updateFestival(festivalToUpdate);
 
@@ -54,18 +62,37 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
         festival.festivalName,
         festival.topics,
         festival.objectives,
-        festival.userNotesForSmartAnalysis // Pass user notes
+        festival.userNotesForSmartAnalysis, // Pass user notes
+        controller.signal
       );
-      updateFestival({ 
-        ...festivalToUpdate, 
-        smartAnalysis: analysisText, 
-        analysisSourceUrls: sourceUrls, 
-        isAnalyzing: false 
-      });
-      setIsSmartAnalysisOpen(true); 
+      if (controller.signal.aborted) {
+         updateFestival({ ...festivalToUpdate, analysisError: "عملیات تحلیل هوشمند توسط کاربر لغو شد.", isAnalyzing: false });
+      } else {
+        updateFestival({ 
+          ...festivalToUpdate, 
+          smartAnalysis: analysisText, 
+          analysisSourceUrls: sourceUrls, 
+          isAnalyzing: false 
+        });
+        setIsSmartAnalysisOpen(true); 
+      }
     } catch (err: any) {
       console.error("Failed to fetch smart analysis:", err);
-      updateFestival({ ...festivalToUpdate, analysisError: err.message || "خطا در دریافت تحلیل", isAnalyzing: false });
+      if (err.name === 'AbortError') {
+        updateFestival({ ...festivalToUpdate, analysisError: "عملیات تحلیل هوشمند توسط کاربر لغو شد.", isAnalyzing: false });
+      } else {
+        updateFestival({ ...festivalToUpdate, analysisError: err.message || "خطا در دریافت تحلیل", isAnalyzing: false });
+      }
+    } finally {
+        smartAnalysisAbortControllerRef.current = null;
+    }
+  };
+
+  const handleCancelSmartAnalysis = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (smartAnalysisAbortControllerRef.current) {
+        smartAnalysisAbortControllerRef.current.abort();
+        updateFestival({ ...festival, isAnalyzing: false, analysisError: "عملیات تحلیل هوشمند توسط کاربر لغو شد." });
     }
   };
 
@@ -154,6 +181,9 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
 
   const handleImageFilesForAnalysisChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     setImageAnalysisError(null);
+    if (imageAnalysisAbortControllerRef.current) {
+        imageAnalysisAbortControllerRef.current.abort(); // Abort any ongoing analysis
+    }
     const files = event.target.files;
     if (files && files.length > 0) {
         if (files.length > MAX_PHOTOS_FOR_ANALYSIS) {
@@ -195,71 +225,112 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
 
   const handleStartImageAnalysis = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (selectedImagesForAnalysis.length === 0 || !festival.smartAnalysis) return;
+    if (selectedImagesForAnalysis.length === 0 || !festival.smartAnalysis || festival.isAnalyzingFestivalImages) return;
+
+    if (imageAnalysisAbortControllerRef.current) { // Abort previous if any
+        imageAnalysisAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    imageAnalysisAbortControllerRef.current = controller;
 
     updateFestival({ ...festival, isAnalyzingFestivalImages: true, analyzedFestivalImages: [] }); 
 
-    const newAnalyzedImages: FestivalImageAnalysis[] = [];
+    let newAnalyzedImages: FestivalImageAnalysis[] = [];
 
     const focusedTopicForGemini = (selectedAnalysisTopic === "تحلیل کلی بر اساس تمام موارد" || selectedAnalysisTopic.trim() === "") 
                                   ? GENERAL_ANALYSIS_TOPIC_VALUE 
                                   : selectedAnalysisTopic;
 
-    for (let i = 0; i < selectedImagesForAnalysis.length; i++) {
-        const file = selectedImagesForAnalysis[i];
-        const imageDataUrl = imagePreviews[i];
-        const userDescription = imageUserDescriptions[i];
-        
-        const tempImageAnalysisEntry: FestivalImageAnalysis = {
-            id: crypto.randomUUID(),
-            sourceImageName: file.name,
-            sourceImageType: file.type,
-            sourceImageDataUrl: imageDataUrl,
-            userDescription: userDescription || undefined,
-            isAnalyzingImage: true,
-        };
-        newAnalyzedImages.push(tempImageAnalysisEntry);
-        updateFestival({ ...festival, isAnalyzingFestivalImages: true, analyzedFestivalImages: [...newAnalyzedImages] });
+    try {
+        for (let i = 0; i < selectedImagesForAnalysis.length; i++) {
+            if (controller.signal.aborted) {
+                throw new DOMException('Image analysis batch aborted by user.', 'AbortError');
+            }
 
-        try {
-            const base64Data = imageDataUrl.split(',')[1];
-            const analysisResult = await analyzeImageForFestivalViaGemini(
-                base64Data,
-                file.type,
-                {
-                    festivalName: festival.festivalName,
-                    topics: festival.topics,
-                    objectives: festival.objectives,
-                    smartAnalysisText: festival.smartAnalysis!,
-                    focusedTopic: focusedTopicForGemini,
-                    userImageDescription: userDescription || undefined
-                }
-            );
+            const file = selectedImagesForAnalysis[i];
+            const imageDataUrl = imagePreviews[i];
+            const userDescription = imageUserDescriptions[i];
             
-            newAnalyzedImages[i] = {
-                ...tempImageAnalysisEntry,
-                geminiAnalysisText: analysisResult.imageCritique,
-                geminiScore: analysisResult.suitabilityScoreOutOf10,
-                geminiScoreReasoning: analysisResult.scoreReasoning,
-                editingCritiqueAndSuggestions: analysisResult.editingCritiqueAndSuggestions,
-                isAnalyzingImage: false,
+            const tempImageAnalysisEntry: FestivalImageAnalysis = {
+                id: crypto.randomUUID(),
+                sourceImageName: file.name,
+                sourceImageType: file.type,
+                sourceImageDataUrl: imageDataUrl,
+                userDescription: userDescription || undefined,
+                isAnalyzingImage: true,
             };
+            newAnalyzedImages.push(tempImageAnalysisEntry);
+            // Update UI immediately to show "analyzing" status for this image
+            updateFestival({ ...festival, isAnalyzingFestivalImages: true, analyzedFestivalImages: [...newAnalyzedImages] });
 
-        } catch (err: any) {
-            console.error(`Error analyzing image ${file.name}:`, err);
-            newAnalyzedImages[i] = {
-                ...tempImageAnalysisEntry,
-                imageAnalysisError: err.message || "خطا در تحلیل تصویر",
-                isAnalyzingImage: false,
-            };
+            try {
+                const base64Data = imageDataUrl.split(',')[1];
+                const analysisResult = await analyzeImageForFestivalViaGemini(
+                    base64Data,
+                    file.type,
+                    {
+                        festivalName: festival.festivalName,
+                        topics: festival.topics,
+                        objectives: festival.objectives,
+                        smartAnalysisText: festival.smartAnalysis!,
+                        focusedTopic: focusedTopicForGemini,
+                        userImageDescription: userDescription || undefined
+                    },
+                    controller.signal
+                );
+                
+                newAnalyzedImages[i] = {
+                    ...tempImageAnalysisEntry,
+                    geminiAnalysisText: analysisResult.imageCritique,
+                    geminiScore: analysisResult.suitabilityScoreOutOf10,
+                    geminiScoreReasoning: analysisResult.scoreReasoning,
+                    editingCritiqueAndSuggestions: analysisResult.editingCritiqueAndSuggestions,
+                    isAnalyzingImage: false,
+                };
+
+            } catch (err: any) {
+                 if (controller.signal.aborted) { // Check again after await
+                     newAnalyzedImages[i] = { ...tempImageAnalysisEntry, imageAnalysisError: "تحلیل این عکس توسط کاربر لغو شد.", isAnalyzingImage: false };
+                     // Do not throw here to allow processing remaining items in loop if abort happened during one API call
+                 } else {
+                    console.error(`Error analyzing image ${file.name}:`, err);
+                    newAnalyzedImages[i] = { ...tempImageAnalysisEntry, imageAnalysisError: err.message || "خطا در تحلیل تصویر", isAnalyzingImage: false };
+                 }
+            }
+            // Update with result for this image (or error/cancellation)
+            updateFestival({ ...festival, isAnalyzingFestivalImages: true, analyzedFestivalImages: [...newAnalyzedImages] });
         }
-        updateFestival({ ...festival, isAnalyzingFestivalImages: true, analyzedFestivalImages: [...newAnalyzedImages] });
+
+        // All images processed or loop was aborted
+        updateFestival({ ...festival, isAnalyzingFestivalImages: false, analyzedFestivalImages: newAnalyzedImages });
+        setSelectedImagesForAnalysis([]); 
+        setImagePreviews([]);
+        setImageUserDescriptions([]);
+        setImageAnalysisError(null); 
+
+    } catch (batchError: any) { // Catches AbortError from the loop itself or other unexpected batch errors
+        if (batchError.name === 'AbortError') {
+            // Mark remaining unprocessed images as cancelled if any
+            newAnalyzedImages = newAnalyzedImages.map(img => img.isAnalyzingImage ? { ...img, isAnalyzingImage: false, imageAnalysisError: "تحلیل توسط کاربر لغو شد." } : img);
+            setImageAnalysisError("عملیات تحلیل عکس‌ها توسط کاربر لغو شد.");
+            updateFestival({ ...festival, isAnalyzingFestivalImages: false, analyzedFestivalImages: newAnalyzedImages });
+        } else {
+            console.error("Error during batch image analysis:", batchError);
+            setImageAnalysisError(`خطای کلی در تحلیل دسته‌ای عکس‌ها: ${batchError.message}`);
+            updateFestival({ ...festival, isAnalyzingFestivalImages: false, analyzedFestivalImages: newAnalyzedImages.map(img => img.isAnalyzingImage ? { ...img, isAnalyzingImage: false, imageAnalysisError: "خطا در عملیات دسته‌ای" } : img) });
+        }
+    } finally {
+         imageAnalysisAbortControllerRef.current = null;
     }
-    updateFestival({ ...festival, isAnalyzingFestivalImages: false, analyzedFestivalImages: newAnalyzedImages });
-    setSelectedImagesForAnalysis([]); 
-    setImagePreviews([]);
-    setImageUserDescriptions([]);
-    setImageAnalysisError(null); 
+  };
+  
+  const handleCancelImageAnalysis = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (imageAnalysisAbortControllerRef.current) {
+        imageAnalysisAbortControllerRef.current.abort();
+         // UI update will happen in the main handleStartImageAnalysis logic upon abortion
+        setImageAnalysisError("عملیات تحلیل عکس‌ها در حال لغو شدن...");
+    }
   };
 
   const handleDeleteAnalyzedImage = (e: React.MouseEvent, imageId: string) => {
@@ -438,9 +509,18 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
             {isSmartAnalysisOpen && (
                  <div id={`smart-analysis-${festival.id}`} className="mt-3 space-y-3">
                     {festival.isAnalyzing && (
-                        <div className="flex items-center justify-center p-4 text-purple-600">
-                            <LoadingSpinner size="6" color="text-purple-600" className="me-2" />
-                            در حال دریافت تحلیل هوشمند...
+                        <div className="flex items-center justify-between p-4 text-purple-600">
+                            <div className="flex items-center">
+                                <LoadingSpinner size="6" color="text-purple-600" className="me-2" />
+                                در حال دریافت تحلیل هوشمند...
+                            </div>
+                            <button 
+                                onClick={handleCancelSmartAnalysis} 
+                                className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 flex items-center"
+                                title="لغو تحلیل هوشمند"
+                            >
+                                <XCircle size={14} className="me-1" /> لغو
+                            </button>
                         </div>
                     )}
                     {festival.analysisError && !festival.isAnalyzing && (
@@ -449,12 +529,14 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
                             <div>
                                 <p className="font-medium">خطا در تحلیل:</p>
                                 <p>{festival.analysisError}</p>
-                                <button 
-                                    onClick={handleFetchSmartAnalysis} 
-                                    className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-                                >
-                                    دوباره تلاش کنید
-                                </button>
+                                {!festival.analysisError.includes("لغو شد") && (
+                                    <button 
+                                        onClick={handleFetchSmartAnalysis} 
+                                        className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                                    >
+                                        دوباره تلاش کنید
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}
@@ -544,31 +626,28 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
 
             {isImageAnalysisSectionOpen && (
               <div id={`image-analysis-user-${festival.id}`} className="mt-4 space-y-4">
-                {/* Topic selection: Input with Datalist */}
-                {(festival.topics && festival.topics.length > 0) && (
-                    <div className="mb-3">
-                        <label htmlFor={`analysis-topic-input-${festival.id}`} className="block text-sm font-medium text-gray-700 mb-1">
-                            <Layers size={16} className="inline me-2 text-indigo-600" />
-                            تحلیل بر اساس کدام موضوع؟ (از لیست انتخاب کنید یا موضوع خود را تایپ نمایید)
-                        </label>
-                        <input
-                            type="text"
-                            id={`analysis-topic-input-${festival.id}`}
-                            list={`analysis-topic-datalist-${festival.id}`}
-                            value={selectedAnalysisTopic}
-                            onChange={(e) => setSelectedAnalysisTopic(e.target.value)}
-                            placeholder="انتخاب/تایپ موضوع (خالی برای تحلیل کلی)"
-                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white text-gray-900 placeholder-gray-500"
-                            disabled={festival.isAnalyzingFestivalImages}
-                        />
-                        <datalist id={`analysis-topic-datalist-${festival.id}`}>
-                            <option value="تحلیل کلی بر اساس تمام موارد" />
-                            {festival.topics.map(topic => (
-                                <option key={topic} value={topic} />
-                            ))}
-                        </datalist>
-                    </div>
-                )}
+                <div className="mb-3">
+                    <label htmlFor={`analysis-topic-input-${festival.id}`} className="block text-sm font-medium text-gray-700 mb-1">
+                        <Layers size={16} className="inline me-2 text-indigo-600" />
+                        تحلیل بر اساس کدام موضوع؟ (از لیست انتخاب کنید یا موضوع خود را تایپ نمایید)
+                    </label>
+                    <input
+                        type="text"
+                        id={`analysis-topic-input-${festival.id}`}
+                        list={`analysis-topic-datalist-${festival.id}`}
+                        value={selectedAnalysisTopic}
+                        onChange={(e) => setSelectedAnalysisTopic(e.target.value)}
+                        placeholder="انتخاب/تایپ موضوع (خالی برای تحلیل کلی)"
+                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white text-gray-900 placeholder-gray-500"
+                        disabled={festival.isAnalyzingFestivalImages}
+                    />
+                    <datalist id={`analysis-topic-datalist-${festival.id}`}>
+                        <option value="تحلیل کلی بر اساس تمام موارد" />
+                        {Array.isArray(festival.topics) && festival.topics.map(topic => (
+                            topic && <option key={topic} value={topic} />
+                        ))}
+                    </datalist>
+                </div>
                 <div>
                   <label htmlFor={`image-upload-${festival.id}`} className="block text-sm font-medium text-gray-700 mb-1">
                     بارگذاری تصاویر برای تحلیل (حداکثر {MAX_PHOTOS_FOR_ANALYSIS} عکس، JPG/PNG):
@@ -582,7 +661,11 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
                     className="block w-full text-sm text-gray-500 file:me-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 disabled:opacity-50"
                     disabled={festival.isAnalyzingFestivalImages || selectedImagesForAnalysis.length >= MAX_PHOTOS_FOR_ANALYSIS}
                   />
-                   {imageAnalysisError && <p className="text-xs text-red-500 mt-1">{imageAnalysisError}</p>}
+                   {imageAnalysisError && (
+                     <div className="p-2 mt-1 bg-red-50 text-red-600 text-xs rounded-md flex items-center">
+                       <AlertCircle size={14} className="me-1"/> {imageAnalysisError}
+                     </div>
+                   )}
                 </div>
 
                 {imagePreviews.length > 0 && (
@@ -612,15 +695,26 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
                     </div>
                 )}
 
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleStartImageAnalysis}
+                        disabled={selectedImagesForAnalysis.length === 0 || festival.isAnalyzingFestivalImages || !festival.smartAnalysis}
+                        className="flex-1 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-sm hover:bg-indigo-700 transition-colors flex items-center justify-center text-sm disabled:bg-gray-400"
+                    >
+                        {festival.isAnalyzingFestivalImages ? <LoadingSpinner size="5" className="me-2" /> : <UploadCloud size={16} className="me-2" />}
+                        {festival.isAnalyzingFestivalImages ? 'در حال تحلیل عکس‌ها...' : `شروع تحلیل ${selectedImagesForAnalysis.length > 0 ? selectedImagesForAnalysis.length : ''} عکس`}
+                    </button>
+                    {festival.isAnalyzingFestivalImages && (
+                         <button 
+                            onClick={handleCancelImageAnalysis} 
+                            className="px-3 py-2 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 flex items-center"
+                            title="لغو تحلیل عکس‌ها"
+                        >
+                            <XCircle size={14} className="me-1" /> لغو
+                        </button>
+                    )}
+                </div>
 
-                <button
-                    onClick={handleStartImageAnalysis}
-                    disabled={selectedImagesForAnalysis.length === 0 || festival.isAnalyzingFestivalImages || !festival.smartAnalysis}
-                    className="w-full px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-sm hover:bg-indigo-700 transition-colors flex items-center justify-center text-sm disabled:bg-gray-400"
-                >
-                    {festival.isAnalyzingFestivalImages ? <LoadingSpinner size="5" className="me-2" /> : <UploadCloud size={16} className="me-2" />}
-                    {festival.isAnalyzingFestivalImages ? 'در حال تحلیل عکس‌ها...' : `شروع تحلیل ${selectedImagesForAnalysis.length > 0 ? selectedImagesForAnalysis.length : ''} عکس`}
-                </button>
 
                 {sortedAnalyzedImages && sortedAnalyzedImages.length > 0 && (
                   <div className="mt-4 space-y-3">

@@ -1,3 +1,4 @@
+
 import React, { useState, FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -5,7 +6,7 @@ import { Lock, LogIn, AlertCircle } from 'lucide-react';
 
 export const PasswordModal: React.FC = () => {
   const [password, setPassword] = useState('');
-  const { login, loginError, isLoadingAuth } = useAuth(); // Assuming isLoadingAuth might be relevant for login button state
+  const { login, loginError, isLoadingAuth } = useAuth(); 
   const [isAttemptingLogin, setIsAttemptingLogin] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -15,16 +16,9 @@ export const PasswordModal: React.FC = () => {
     try {
       await login(password);
     } catch (err) {
-      // login function internally sets loginError, so specific catch here might be redundant
-      // unless login itself throws, which it doesn't seem to based on its current implementation.
-      console.error("Error during login attempt:", err);
+      console.error("Unexpected error during login attempt:", err);
     } finally {
       setIsAttemptingLogin(false);
-      // Password might be cleared after attempt, or not, based on UX preference.
-      // For now, let's clear it on failed attempt if there's an error.
-      if (loginError) { 
-        setPassword(''); // Clear password only if there was an error with this attempt.
-      }
     }
   };
 
@@ -79,7 +73,7 @@ export const PasswordModal: React.FC = () => {
           </div>
         </form>
          <p className="text-xs text-gray-400 mt-6 text-center">
-            هر رمز عبور به مدت ۲۴ ساعت از اولین استفاده معتبر است.
+            هر کد رمز عبور تنها یک بار قابل فعال‌سازی است. پس از فعال‌سازی، به مدت ۲۴ ساعت برای کاربر فعال‌کننده معتبر خواهد بود.
         </p>
       </div>
     </div>
