@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { FestivalInfo, FestivalImageAnalysis } from '../types';
 import { Calendar, Edit, Trash2, FileText, Tag, Clock, Image as LucideImage, Link as LinkIcon, Maximize, ChevronDown, ChevronUp, Target, Download, Brain, Zap, ExternalLink, AlertCircle, UploadCloud, CameraOff, Info as InfoIcon, Star, ListChecks, Layers, MessageSquare, Edit3, FilePlus, XCircle, RefreshCw } from 'lucide-react'; // Added RefreshCw
 import { useFestivals } from '../contexts/FestivalsContext';
@@ -17,6 +17,46 @@ interface FestivalCardProps {
 
 const MAX_PHOTOS_FOR_ANALYSIS = 10;
 
+const extractTopicsFromSmartAnalysis = (smartAnalysisText?: string): string[] => {
+  if (!smartAnalysisText) return [];
+
+  const extractedTopics: string[] = [];
+  const sectionsToParse = [
+    "**ژانرها و سبک‌های عکاسی پیشنهادی:**",
+    "**ایده‌ها و مفاهیم کلیدی برای عکاسی (دقیق و کاربردی):**"
+  ];
+
+  for (const sectionTitle of sectionsToParse) {
+    const sectionStartIndex = smartAnalysisText.indexOf(sectionTitle);
+    if (sectionStartIndex === -1) continue;
+
+    let sectionEndIndex = smartAnalysisText.length;
+    // Find the start of the next section or end of text
+    const nextSectionRegex = /\n\*\*(.+?):\*\*/g;
+    nextSectionRegex.lastIndex = sectionStartIndex + sectionTitle.length;
+    const nextMatch = nextSectionRegex.exec(smartAnalysisText);
+    if (nextMatch) {
+      sectionEndIndex = nextMatch.index;
+    }
+    
+    const sectionContent = smartAnalysisText.substring(sectionStartIndex + sectionTitle.length, sectionEndIndex);
+    const lines = sectionContent.split('\n');
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (trimmedLine.startsWith('* ')) {
+        let topic = trimmedLine.substring(2).trim();
+        // Further clean up potential markdown or long descriptions
+        topic = topic.split(/[:؛(]/)[0].trim(); // Stop at colons, semicolons, or open parens
+        if (topic && topic.length > 3 && topic.length < 100) { // Basic sanity check for topic length
+          extractedTopics.push(topic);
+        }
+      }
+    }
+  }
+  return extractedTopics;
+};
+
+
 export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) => {
   const { deleteFestival, updateFestival } = useFestivals();
   const [isOpen, setIsOpen] = useState(false);
@@ -33,6 +73,29 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
 
   const smartAnalysisAbortControllerRef = useRef<AbortController | null>(null);
   const imageAnalysisAbortControllerRef = useRef<AbortController | null>(null);
+
+  const dynamicAnalysisTopics = useMemo(() => {
+    const topics = new Set<string>();
+    topics.add("تحلیل کلی بر اساس تمام موارد");
+
+    if (Array.isArray(festival.topics)) {
+      festival.topics.forEach(topic => topic && topics.add(topic.trim()));
+    }
+
+    if (festival.smartAnalysis) {
+      const extracted = extractTopicsFromSmartAnalysis(festival.smartAnalysis);
+      extracted.forEach(topic => topic && topics.add(topic.trim()));
+    }
+    
+    // If objectives is a string and seems like a short, topic-like phrase, consider adding it.
+    // This is a heuristic and might need refinement.
+    if (festival.objectives && festival.objectives.length < 100 && !festival.objectives.includes('\n') && !topics.has(festival.objectives.trim())) {
+        // topics.add(`هدف اصلی: ${festival.objectives.trim()}`); // Example: prefixing it
+    }
+
+
+    return Array.from(topics);
+  }, [festival.topics, festival.smartAnalysis, festival.objectives]);
 
 
   const toggleOpen = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -650,15 +713,21 @@ export const FestivalCard: React.FC<FestivalCardProps> = ({ festival, onEdit }) 
                         value={selectedAnalysisTopic}
                         onChange={(e) => setSelectedAnalysisTopic(e.target.value)}
                         placeholder="انتخاب/تایپ موضوع (خالی برای تحلیل کلی)"
-                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white text-gray-900 placeholder-gray-500"
+                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white text-gray-900 placeholder-gray-500 disabled:opacity-75 disabled:bg-gray-100 disabled:cursor-not-allowed"
                         disabled={festival.isAnalyzingFestivalImages}
+                        title={festival.isAnalyzingFestivalImages ? "تحلیل عکس‌ها در حال انجام است، لطفا صبر کنید." : (dynamicAnalysisTopics.length <=1 ? "ابتدا «تحلیل هوشمند جشنواره» را انجام دهید یا به صورت دستی در ویرایش فراخوان، موضوعات را اضافه کنید." : "")}
+
                     />
                     <datalist id={`analysis-topic-datalist-${festival.id}`}>
-                        <option value="تحلیل کلی بر اساس تمام موارد" />
-                        {Array.isArray(festival.topics) && festival.topics.map(topic => (
-                            topic && <option key={topic} value={topic} />
+                        {dynamicAnalysisTopics.map(topic => (
+                           topic && <option key={topic} value={topic} />
                         ))}
                     </datalist>
+                     {dynamicAnalysisTopics.length <= 1 && !festival.isAnalyzingFestivalImages && (
+                        <p className="text-xs text-gray-500 mt-1">
+                            برای مشاهده پیشنهادات بیشتر، ابتدا <button onClick={(e) => {e.stopPropagation(); if (!isSmartAnalysisOpen) setIsSmartAnalysisOpen(true); document.getElementById(`smart-analysis-${festival.id}`)?.scrollIntoView({behavior: 'smooth'}); }} className="text-indigo-600 hover:underline">تحلیل هوشمند جشنواره</button> را انجام دهید یا در بخش ویرایش، موضوعات را مشخص کنید.
+                        </p>
+                    )}
                 </div>
                 <div>
                   <label htmlFor={`image-upload-${festival.id}`} className="block text-sm font-medium text-gray-700 mb-1">

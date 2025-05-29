@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef } from 'react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalInfo, ExtractedData, FestivalSourceFile } from '../types';
@@ -197,7 +198,13 @@ export const FileUploadArea: React.FC = () => {
 
     } catch (err: any) {
       console.error("Error processing data with Gemini:", err);
-      if (err.name === 'AbortError') {
+      const knownAbortMessages = [
+        'Operation aborted by user', 
+        'Operation aborted by user post-API call', 
+        'Operation aborted by user after Gemini extraction'
+      ];
+
+      if (err.name === 'AbortError' || (typeof err.message === 'string' && knownAbortMessages.includes(err.message))) {
         setError('عملیات پردازش توسط کاربر لغو شد.');
         setProcessingMessage(null);
       } else {
@@ -280,7 +287,14 @@ export const FileUploadArea: React.FC = () => {
 
     } catch (err: any) {
       console.error("Error processing file(s):", err);
-      if (err.name === 'AbortError') {
+      const knownFileAbortMessages = [
+        'Operation aborted by user',
+        'Operation aborted by user post-API call',
+        'Operation aborted during PDF processing',
+        'Operation aborted during image loop',
+        'Operation aborted before final processing'
+      ];
+      if (err.name === 'AbortError' || (typeof err.message === 'string' && knownFileAbortMessages.includes(err.message))) {
         setError('عملیات پردازش توسط کاربر لغو شد.');
         setProcessingMessage(null);
       } else {
