@@ -517,7 +517,7 @@ export const FestivalList: React.FC = () => {
         <div className="text-center py-10 text-gray-500">هیچ فراخوانی با معیارهای جستجو/فیلتر شما مطابقت ندارد.</div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="space-y-6">
         {filteredFestivals.map(festival => (
           <FestivalCard key={festival.id} festival={festival} onEdit={handleEdit} />
         ))}

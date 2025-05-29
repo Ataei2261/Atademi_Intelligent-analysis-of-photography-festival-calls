@@ -169,7 +169,13 @@ export const FileUploadArea: React.FC = () => {
 
     } catch (err: any) {
       console.error("Error processing data with Gemini:", err);
-      setError(`خطا در پردازش اطلاعات: ${err.message}`);
+      let displayError = `خطا در پردازش اطلاعات: ${err.message}`;
+      if (err.message && typeof err.message === 'string' && 
+          (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
+          (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
+        displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+      }
+      setError(displayError);
       setProcessingMessage(null);
     } finally {
       setIsLoading(false);
@@ -231,7 +237,13 @@ export const FileUploadArea: React.FC = () => {
 
     } catch (err: any) {
       console.error("Error processing file(s):", err);
-      setError(`خطا در پردازش فایل(ها): ${err.message}`);
+      let displayError = `خطا در پردازش فایل(ها): ${err.message}`;
+      if (err.message && typeof err.message === 'string' && 
+          (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
+          (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
+        displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+      }
+      setError(displayError);
       setProcessingMessage(null);
       setIsLoading(false);
     }
@@ -356,8 +368,9 @@ export const FileUploadArea: React.FC = () => {
 
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md flex items-center text-sm">
-          <AlertCircle className="h-5 w-5 me-2" /> {error}
-           <button onClick={() => setError(null)} className="ms-auto text-red-700 hover:text-red-900">
+          <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" /> 
+          <span className="flex-grow">{error}</span>
+           <button onClick={() => setError(null)} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0">
             <X size={18} />
           </button>
         </div>
