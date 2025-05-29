@@ -1,0 +1,130 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>دستیار هوشمند فراخوان‌های عکاسی</title>
+  <meta name="theme-color" content="#14b8a6">
+  <link rel="manifest" href="/manifest.json">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap">
+  <style>
+    body {
+      font-family: 'Vazirmatn', sans-serif;
+      background-color: #f7fafc; /* Tailwind gray-100 */
+      color: #2d3748; /* Tailwind gray-800 */
+    }
+    /* Custom scrollbar for better RTL aesthetics */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #edf2f7; /* Tailwind gray-200 */
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #a0aec0; /* Tailwind gray-500 */
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #718096; /* Tailwind gray-600 */
+    }
+    .jalali-calendar-day.today {
+      background-color: #ebf8ff; /* Tailwind blue-100 */
+      border: 1px solid #90cdf4; /* Tailwind blue-300 */
+    }
+    /* Container for multiple dots */
+    .dots-container {
+      display: flex;
+      justify-content: center; /* Center dots horizontally */
+      align-items: center; /* Center dots vertically if they have different heights (unlikely here) */
+      position: absolute;
+      bottom: 2px; /* Adjust as needed */
+      left: 0;
+      right: 0;
+      gap: 2px; /* Space between dots */
+      padding: 0 2px; /* Padding inside the container if needed */
+      height: 8px; /* Fixed height for the container */
+    }
+
+    /* Individual dot style */
+    .deadline-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 0.5px solid rgba(0,0,0,0.1); /* Optional: slight border for definition */
+    }
+    
+    .dot-indicator-text {
+      font-size: 0.6rem; /* Tiny text for +N */
+      line-height: 1;
+      color: #4a5568; /* Tailwind gray-700 */
+    }
+
+    /* Specific colors for deadline dots */
+    .dot-past {
+      background-color: #2d3748; /* Tailwind gray-800 (Black-ish) */
+    }
+    .dot-urgent {
+      background-color: #f56565; /* Tailwind red-500 (Red) */
+    }
+    .dot-near {
+      background-color: #f6e05e; /* Tailwind yellow-400 (Yellow) */
+    }
+    .dot-far {
+      background-color: #48bb78; /* Tailwind green-500 (Green) */
+    }
+
+    /* Blinking animation for critical deadlines */
+    @keyframes blinker {
+      0%, 100% {
+        opacity: 1;
+        border-color: #e53e3e; /* Tailwind red-600 */
+      }
+      50% {
+        opacity: 0.6;
+        border-color: #f56565; /* Tailwind red-500 */
+      }
+    }
+    .animate-blink {
+      animation: blinker 1.5s linear infinite;
+      /* Initial border will be set by Tailwind's border-red-600 */
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "pdfjs-dist": "https://esm.sh/pdfjs-dist@5.2.133",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.511.0",
+    "jszip": "https://esm.sh/jszip@^3.10.1",
+    "@google/genai": "https://esm.sh/@google/genai@^1.2.0",
+    "pdfjs-dist/": "https://esm.sh/pdfjs-dist@5.2.133/",
+    "jalaali-js": "https://esm.sh/jalaali-js@^1.2.8"
+  }
+}
+</script>
+</head>
+<body class="bg-gray-100 text-gray-800">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(registration => {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          })
+          .catch(error => {
+            console.log('ServiceWorker registration failed: ', error);
+          });
+      });
+    }
+  </script>
+</body>
+</html><link rel="stylesheet" href="index.css">
+<script src="index.tsx" type="module"></script>
