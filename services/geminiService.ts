@@ -5,17 +5,28 @@ import { ExtractedData, FestivalInfo } from "../types";
 import { normalizeSubmissionUrl } from '../utils/urlUtils'; 
 import { convertPersianToWesternNumerals } from "../utils/persianTools";
 
-// Ensure API_KEY is available. In a real build setup, this would be handled by environment variables.
-// For this context, we assume `process.env.API_KEY` is made available.
 const API_KEY = process.env.API_KEY;
+let ai: GoogleGenAI | null = null;
 
-if (!API_KEY) {
-  console.error("API_KEY for Gemini is not set. Please ensure the API_KEY environment variable is available.");
-  // Optionally, throw an error or disable AI features if the key is missing.
-  // throw new Error("API_KEY for Gemini is not set.");
+if (API_KEY && API_KEY.trim() !== "") {
+  try {
+    ai = new GoogleGenAI({ apiKey: API_KEY });
+    console.info("Gemini API client initialized successfully using API_KEY from environment.");
+  } catch (error) {
+    console.error(
+      "CRITICAL: Error initializing GoogleGenAI client with API_KEY from environment variables.\n" +
+      "AI features will likely be disabled. Please check the API_KEY and your network connection.\n",
+      error
+    );
+    // ai remains null
+  }
+} else {
+  console.error(
+    "CRITICAL: API_KEY for Gemini is not set or is empty in environment variables (process.env.API_KEY).\n" +
+    "AI features will be disabled. Please ensure the API_KEY environment variable is correctly configured."
+  );
+  // ai remains null
 }
-
-const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 export const GENERAL_ANALYSIS_TOPIC_VALUE = "__GENERAL__";
 
@@ -31,7 +42,9 @@ const cleanJsonString = (jsonStr: string): string => {
 };
 
 export async function extractTextFromImageViaGemini(base64ImageData: string, mimeType: string): Promise<string> {
-  if (!ai) throw new Error("Gemini API client not initialized. API_KEY might be missing.");
+  if (!ai) {
+    throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
   
   const imagePart: Part = {
     inlineData: {
@@ -57,7 +70,9 @@ export async function extractTextFromImageViaGemini(base64ImageData: string, mim
 
 
 export async function extractFestivalInfoFromTextViaGemini(text: string, fileName: string): Promise<ExtractedData> {
-  if (!ai) throw new Error("Gemini API client not initialized. API_KEY might be missing.");
+  if (!ai) {
+    throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
 
   const prompt = `
 You are an expert system for extracting information from photography contest announcements.
@@ -118,15 +133,14 @@ Example JSON output:
         model: GEMINI_MODEL_TEXT,
         contents: prompt,
         config: {
-            // responseMimeType: "application/json", // Removed due to conflict with tools
-            tools: [{googleSearch: {}}], // Enable Google Search
+            tools: [{googleSearch: {}}], 
         }
     });
     
     apiResponseText = response.text;
     const jsonString = cleanJsonString(apiResponseText);
     
-    const rawParsedData = JSON.parse(jsonString) as any; // Parse as any initially
+    const rawParsedData = JSON.parse(jsonString) as any; 
     
     let extractionSourceUrls: { uri: string; title: string }[] = [];
     if (response.candidates && response.candidates[0]?.groundingMetadata?.groundingChunks) {
@@ -136,21 +150,20 @@ Example JSON output:
           uri: chunk.web!.uri!,
           title: chunk.web!.title || chunk.web!.uri!,
         }));
-      // Deduplicate sourceUrls by URI
       extractionSourceUrls = Array.from(new Map(extractionSourceUrls.map(item => [item.uri, item])).values());
     }
     
     const parsedData: ExtractedData = {
         festivalName: rawParsedData.festivalName,
         objectives: rawParsedData.objectives,
-        topics: [], // Initialize as empty array
+        topics: [], 
         maxPhotos: typeof rawParsedData.maxPhotos === 'string' 
             ? convertPersianToWesternNumerals(rawParsedData.maxPhotos) 
             : rawParsedData.maxPhotos,
         submissionDeadlineGregorian: convertPersianToWesternNumerals(rawParsedData.submissionDeadlineGregorian),
         submissionDeadlinePersian: convertPersianToWesternNumerals(rawParsedData.submissionDeadlinePersian),
         imageSize: rawParsedData.imageSize,
-        submissionMethod: rawParsedData.submissionMethod ? normalizeSubmissionUrl(rawParsedData.submissionMethod) : undefined, // Normalize here
+        submissionMethod: rawParsedData.submissionMethod ? normalizeSubmissionUrl(rawParsedData.submissionMethod) : undefined,
         extractionSourceUrls: extractionSourceUrls.length > 0 ? extractionSourceUrls : undefined,
     };
 
@@ -173,7 +186,6 @@ Example JSON output:
     if (error instanceof SyntaxError && apiResponseText) {
       throw new Error(`Gemini API error during information extraction: ${errorMessage}. Problematic JSON string: ${cleanJsonString(apiResponseText)}`);
     }
-    // Include the Gemini API error message directly if possible
     if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as any).message === 'string') {
        const geminiMessage = (error as any).message;
        if (geminiMessage.includes("INVALID_ARGUMENT") || geminiMessage.includes("Tool use with a response mime type")){
@@ -188,9 +200,11 @@ export async function getSmartFestivalAnalysisViaGemini(
   festivalName: string | undefined,
   topics: string[] | undefined,
   objectives: string | undefined,
-  userNotesForSmartAnalysis?: string // New parameter
+  userNotesForSmartAnalysis?: string
 ): Promise<{ analysisText: string; sourceUrls: { uri: string; title: string }[] }> {
-  if (!ai) throw new Error("Gemini API client not initialized. API_KEY might be missing.");
+  if (!ai) {
+    throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
   if (!festivalName) throw new Error("Festival name is required for smart analysis.");
 
   const topicsString = topics && topics.length > 0 ? topics.join(', ') : 'نامشخص';
@@ -289,7 +303,7 @@ interface ImageAnalysisPayload {
   imageCritique: string;
   suitabilityScoreOutOf10: number;
   scoreReasoning: string;
-  editingCritiqueAndSuggestions?: string | null; // Updated to allow null explicitly
+  editingCritiqueAndSuggestions?: string | null;
 }
 
 interface FestivalContextForImageAnalysis {
@@ -298,7 +312,7 @@ interface FestivalContextForImageAnalysis {
     objectives?: string;
     smartAnalysisText: string; 
     focusedTopic?: string; 
-    userImageDescription?: string; // Optional user-provided description for the image
+    userImageDescription?: string;
 }
 
 export async function analyzeImageForFestivalViaGemini(
@@ -306,7 +320,9 @@ export async function analyzeImageForFestivalViaGemini(
   mimeType: string,
   festivalInfo: FestivalContextForImageAnalysis
 ): Promise<ImageAnalysisPayload> {
-  if (!ai) throw new Error("Gemini API client not initialized. API_KEY might be missing.");
+  if (!ai) {
+    throw new Error("Gemini API client is not initialized. This is likely due to a missing or invalid API_KEY in the environment variables. Please check your setup.");
+  }
   if (!festivalInfo.smartAnalysisText) throw new Error("Smart festival analysis text is required to analyze the image.");
 
   const imagePart: Part = {
@@ -426,12 +442,8 @@ Return your response as a **single, valid JSON object (یک شیء JSON واحد
     if (parsedData.suitabilityScoreOutOf10 < 7) {
         parsedData.editingCritiqueAndSuggestions = null;
     } else if (parsedData.editingCritiqueAndSuggestions === "") { 
-        // If Gemini returns empty string for score >=7, make it null for consistency,
-        // or consider if prompt needs adjustment if this happens often.
-        // For now, this ensures it's either populated string or null.
         parsedData.editingCritiqueAndSuggestions = null; 
     }
-
 
     return parsedData;
 
