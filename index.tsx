@@ -1,7 +1,7 @@
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App.tsx'; // Changed from './App'
+import App from './App.tsx';
+import ErrorBoundary from './components/ErrorBoundary.tsx'; // Import ErrorBoundary
 import { GlobalWorkerOptions } from 'pdfjs-dist';
 
 // Setup PDF.js worker. This is crucial for pdfjs-dist to work.
@@ -18,6 +18,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary fallbackMessage="خطایی در بارگذاری اولیه برنامه رخ داده است.">
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
