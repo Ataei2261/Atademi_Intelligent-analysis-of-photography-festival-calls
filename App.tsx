@@ -128,10 +128,21 @@ const AppContentWrapper: React.FC = () => {
 
       allUpcomingForNotifications.forEach(festival => {
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          new Notification(`یادآوری: ${festival.festivalName}`, {
-            body: `مهلت ارسال آثار برای ${festival.festivalName} به زودی (ظرف ۲ روز آینده) به پایان می‌رسد.`,
-            icon: '/logo192.png',
-          });
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.ready.then(registration => {
+              registration.showNotification(`یادآوری: ${festival.festivalName}`, {
+                body: `مهلت ارسال آثار برای ${festival.festivalName} به زودی (ظرف ۲ روز آینده) به پایان می‌رسد.`,
+                icon: '/logo192.png',
+                tag: `deadline-reminder-${festival.id}` // Use a tag to prevent duplicate notifications
+              });
+            }).catch(err => {
+              console.error('Service Worker: Error showing notification:', err);
+            });
+          } else {
+            console.warn('Service Worker not ready or not available for notifications. Notification for "${festival.festivalName}" might not be shown.');
+            // Fallback to direct notification might still cause "Illegal constructor" on some platforms if SW is registered but not active.
+            // The primary fix is using registration.showNotification(). If that path fails, it's an issue with SW readiness.
+          }
         }
       });
       
