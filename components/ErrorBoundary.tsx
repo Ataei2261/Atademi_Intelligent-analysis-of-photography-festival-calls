@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 
@@ -36,8 +37,8 @@ class ErrorBoundary extends Component<Props, State> {
   private handleClearStorageAndReload = () => {
     try {
       console.warn("Attempting to clear localStorage due to critical error.");
-      // Selectively remove app-specific keys if possible, otherwise clear all
-      const appKeys = ['festivals', 'appPasswordActivations_v2', 'appActiveSession_v2']; // Add other app-specific keys if any
+      // Selectively remove app-specific keys
+      const appKeys = ['festivals', 'auth-session-v2']; // Updated key here
       let clearedSomething = false;
       appKeys.forEach(key => {
         if (localStorage.getItem(key) !== null) {
@@ -46,11 +47,8 @@ class ErrorBoundary extends Component<Props, State> {
           console.log(`[ErrorBoundary] Removed '${key}' from localStorage.`);
         }
       });
-      if (!clearedSomething) { // If no app-specific keys were found/removed, implies broader issue or they were already gone.
-         // As a last resort for stubborn issues, or if selective removal isn't enough:
-         // localStorage.clear();
-         // console.log("[ErrorBoundary] localStorage.clear() was called.");
-         // For now, let's stick to selective removal. User can manually clear site data if this isn't enough.
+      if (!clearedSomething) { 
+         // console.log("[ErrorBoundary] No app-specific keys found to remove, or they were already gone.");
       }
 
     } catch (e) {

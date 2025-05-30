@@ -1,125 +1,171 @@
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
+import { ActiveSession, AuthContextType } from '../types';
+import { verifyPassword } from '../services/authService';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { VALID_PASSWORDS, PASSWORD_EXPIRY_DURATION_MS } from '../constants';
-import { PasswordActivations, PasswordActivationInfo, ActiveSession } from '../types';
-
-interface AuthContextType {
-  isAuthenticated: boolean;
-  authenticatedUser: string | null;
-  isLoadingAuth: boolean;
-  loginError: string | null;
-  sessionExpiryTimestamp: number | null; // Added for countdown timer
-  login: (password: string) => Promise<void>;
-  logout: () => void;
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authenticatedUser, setAuthenticatedUser] = useState<string | null>(null);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [sessionExpiryTimestamp, setSessionExpiryTimestamp] = useState<number | null>(null); // State for expiry timestamp
+const SESSION_KEY = 'auth-session-v2'; 
+const LEGACY_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours (fallback)
 
-  const [passwordActivations, setPasswordActivations, storageErrorPasswordActivations] = useLocalStorage<PasswordActivations>('appPasswordActivations_v2', {});
-  const [activeSession, setActiveSession, storageErrorActiveSession] = useLocalStorage<ActiveSession | null>('appActiveSession_v2', null);
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [storedSession, setStoredSession, storageError] = useLocalStorage<ActiveSession | null>(SESSION_KEY, null);
+  const [activeSession, setActiveSession] = useState<ActiveSession>({ isAuthenticated: false });
+  const [isLoading, setIsLoading] = useState<boolean>(true); 
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsLoadingAuth(true);
-    if (activeSession && activeSession.password && activeSession.user) {
-      const activationInfo = passwordActivations[activeSession.password];
-      
-      if (activationInfo && 
-          activationInfo.activatedBy === activeSession.user &&
-          VALID_PASSWORDS[activeSession.password] === activeSession.user) { // Double check consistency
-        
-        const expiryTime = activationInfo.activatedAt + PASSWORD_EXPIRY_DURATION_MS;
-        if (Date.now() < expiryTime) {
-          setIsAuthenticated(true);
-          setAuthenticatedUser(activationInfo.activatedBy);
-          setSessionExpiryTimestamp(expiryTime);
-        } else {
-          // Session expired
-          setActiveSession(null);
-          setIsAuthenticated(false);
-          setAuthenticatedUser(null);
-          setSessionExpiryTimestamp(null);
-        }
-      } else {
-        // Session invalid (e.g., activation info mismatch or password not in VALID_PASSWORDS for this user)
-        setActiveSession(null);
-        setIsAuthenticated(false);
-        setAuthenticatedUser(null);
-        setSessionExpiryTimestamp(null);
-      }
-    } else {
-      setIsAuthenticated(false);
-      setAuthenticatedUser(null);
-      setSessionExpiryTimestamp(null);
+    if (storageError) {
+        console.error("Error with localStorage for session:", storageError);
+        setStoredSession(null); 
     }
-    setIsLoadingAuth(false);
-  }, [activeSession, passwordActivations, setActiveSession]);
+    if (storedSession && storedSession.isAuthenticated) {
+      const now = Date.now();
+      let sessionIsValid = false;
+      
+      // Check activation token first
+      if (storedSession.activationToken && storedSession.activationTokenExpiresAt && storedSession.activationTokenExpiresAt > now) {
+        sessionIsValid = true;
+      } 
+      // No valid activation token, check overall key expiry if it exists
+      else if (storedSession.sessionExpiresAt && storedSession.sessionExpiresAt > now) {
+        // This case implies activation token might be expired or was never there, but the main key is still valid.
+        // For a stricter model, we might want to force re-auth if activation token expires.
+        // However, if an activation token *was* present and expired, we should log out.
+        if (storedSession.activationToken && storedSession.activationTokenExpiresAt && storedSession.activationTokenExpiresAt <= now) {
+            console.log("Activation token expired. Session considered invalid despite overall key validity.");
+            sessionIsValid = false; 
+        } else if (!storedSession.activationToken) { // No activation token, rely on overall key expiry
+             sessionIsValid = true;
+             console.warn("Active session using overall key expiry (sessionExpiresAt) as activation token is missing.");
+        }
+      }
+      // Fallback for very old legacy sessions (without activation token and without sessionExpiresAt from server)
+      else if (!storedSession.activationToken && !storedSession.sessionExpiresAt && storedSession.sessionStartedAt && (now - storedSession.sessionStartedAt < LEGACY_SESSION_DURATION_MS)) {
+        sessionIsValid = true;
+        console.warn("Active session is a legacy session using client-side duration.");
+      }
+
+      if (sessionIsValid) {
+        setActiveSession(storedSession);
+      } else {
+        console.log("Stored session is invalid or expired. Clearing session.");
+        setStoredSession(null); 
+        setActiveSession({ isAuthenticated: false });
+      }
+    }
+    setIsLoading(false);
+  }, [storedSession, setStoredSession, storageError]);
 
   const login = useCallback(async (password: string) => {
-    setLoginError(null);
-    if (!VALID_PASSWORDS[password]) {
-      setLoginError("رمز عبور نامعتبر است.");
-      return;
-    }
+    setIsLoading(true);
+    setAuthError(null);
+    try {
+      const response = await verifyPassword(password);
+      if (response.success) {
+        const now = Date.now();
+        let tokenExpiryTimestamp: number | undefined = undefined;
+        if (response.activationTokenExpiresAt) {
+          tokenExpiryTimestamp = Date.parse(response.activationTokenExpiresAt);
+          if (isNaN(tokenExpiryTimestamp)) {
+            console.error("Invalid activationTokenExpiresAt received from server:", response.activationTokenExpiresAt);
+            setAuthError("خطای داخلی: تاریخ انقضای نامعتبر از سرور دریافت شد.");
+            setIsLoading(false);
+            return;
+          }
+        }
 
-    const userIdentifier = VALID_PASSWORDS[password];
-    const activationInfo = passwordActivations[password];
-    let expiryTime: number;
-
-    if (activationInfo) { // Password code has been activated before
-      if (activationInfo.activatedBy !== userIdentifier) {
-        setLoginError(`این کد رمز عبور قبلاً توسط کاربر دیگری ("${activationInfo.activatedBy}") فعال شده و برای شما معتبر نیست.`);
-        return;
+        const newSession: ActiveSession = {
+          isAuthenticated: true,
+          userIdentifier: response.user || password,
+          activationToken: response.activationToken,
+          activationTokenExpiresAt: tokenExpiryTimestamp,
+          sessionStartedAt: now, 
+          sessionExpiresAt: response.expiresAt ? Date.parse(response.expiresAt) : undefined, 
+        };
+        setActiveSession(newSession);
+        setStoredSession(newSession);
+      } else {
+        setAuthError(response.error || 'رمز عبور نامعتبر است یا فعال‌سازی امکان‌پذیر نیست.');
+        setActiveSession({ isAuthenticated: false });
+        setStoredSession(null);
       }
-      // Activated by the same user, check expiry
-      expiryTime = activationInfo.activatedAt + PASSWORD_EXPIRY_DURATION_MS;
-      if (Date.now() >= expiryTime) {
-        setLoginError(`اعتبار ۲۴ ساعته شما برای این رمز عبور ("${userIdentifier}") به پایان رسیده است.`);
-        return;
-      }
-      // Still valid for this user
-      setIsAuthenticated(true);
-      setAuthenticatedUser(userIdentifier);
-      setActiveSession({ password, user: userIdentifier, sessionStartedAt: Date.now() });
-      setSessionExpiryTimestamp(expiryTime);
-
-    } else { // First time this password code is being used by anyone
-      const firstActivationTime = Date.now();
-      const newActivationInfo: PasswordActivationInfo = { 
-        activatedAt: firstActivationTime, 
-        activatedBy: userIdentifier 
-      };
-      setPasswordActivations(prev => ({ ...prev, [password]: newActivationInfo }));
-
-      expiryTime = firstActivationTime + PASSWORD_EXPIRY_DURATION_MS;
-      setIsAuthenticated(true);
-      setAuthenticatedUser(userIdentifier);
-      setActiveSession({ password, user: userIdentifier, sessionStartedAt: Date.now() });
-      setSessionExpiryTimestamp(expiryTime);
+    } catch (error: any) {
+      console.error("Login error:", error);
+      setAuthError(error.message || 'خطایی در هنگام ورود رخ داد.');
+      setActiveSession({ isAuthenticated: false });
+      setStoredSession(null);
+    } finally {
+      setIsLoading(false);
     }
-  }, [passwordActivations, setPasswordActivations, setActiveSession]);
+  }, [setStoredSession]);
 
   const logout = useCallback(() => {
-    setIsAuthenticated(false);
-    setAuthenticatedUser(null);
-    setActiveSession(null);
-    setSessionExpiryTimestamp(null); // Clear expiry timestamp on logout
-  }, [setActiveSession]);
+    setActiveSession({ isAuthenticated: false });
+    setStoredSession(null);
+  }, [setStoredSession]);
+  
+  useEffect(() => {
+    if (activeSession.isAuthenticated) {
+      const now = Date.now();
+      let soonestValidExpiryMs: number | null = null;
+      let expiryTypeForLog = "unknown";
 
-  if (storageErrorActiveSession || storageErrorPasswordActivations) {
-    console.error("Storage error in AuthProvider:", storageErrorActiveSession, storageErrorPasswordActivations);
-    // Consider how to handle critical storage errors if they occur.
-  }
+      // Candidate 1: Activation Token Expiry
+      if (activeSession.activationToken && activeSession.activationTokenExpiresAt && activeSession.activationTokenExpiresAt > now) {
+        soonestValidExpiryMs = activeSession.activationTokenExpiresAt;
+        expiryTypeForLog = "activationToken";
+      }
+
+      // Candidate 2: Overall Key Expiry (from server, stored in sessionExpiresAt)
+      if (activeSession.sessionExpiresAt && activeSession.sessionExpiresAt > now) {
+        if (soonestValidExpiryMs === null || activeSession.sessionExpiresAt < soonestValidExpiryMs) {
+          soonestValidExpiryMs = activeSession.sessionExpiresAt;
+          expiryTypeForLog = "overallKey (sessionExpiresAt)";
+        }
+      }
+      
+      // Candidate 3: Legacy client-side session (only if no modern expiries are active)
+      // This is less relevant if server always provides one of the above for valid keys.
+      if (soonestValidExpiryMs === null && 
+          !activeSession.activationToken && 
+          !activeSession.sessionExpiresAt && 
+          activeSession.sessionStartedAt) {
+          const legacyExpiry = activeSession.sessionStartedAt + LEGACY_SESSION_DURATION_MS;
+          if (legacyExpiry > now) {
+              soonestValidExpiryMs = legacyExpiry;
+              expiryTypeForLog = "legacyClientSession";
+          }
+      }
+
+      if (soonestValidExpiryMs !== null) {
+        const timeRemaining = soonestValidExpiryMs - now;
+        // timeRemaining should be > 0 due to checks above. 
+        // If it's somehow <=0, it means the session is already expired, logout() will handle it soon.
+        if (timeRemaining <= 0) { 
+          console.log(`Session determined to be already expired by ${expiryTypeForLog}. Logging out.`);
+          logout();
+          return;
+        }
+
+        const timerId = setTimeout(() => {
+            console.log(`Session timer expired (type: ${expiryTypeForLog}). Logging out.`);
+            logout();
+        }, timeRemaining);
+        return () => clearTimeout(timerId);
+      } else {
+        // No valid future expiry found (all are past, or not set, or session structure is unexpected).
+        // This implies the session is already invalid based on stored data.
+        console.log("No valid future expiry for current session state. Logging out.");
+        logout();
+      }
+    }
+  }, [activeSession, logout]);
+
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, authenticatedUser, isLoadingAuth, login, logout, loginError, sessionExpiryTimestamp }}>
+    <AuthContext.Provider value={{ activeSession, login, logout, isLoading, authError }}>
       {children}
     </AuthContext.Provider>
   );

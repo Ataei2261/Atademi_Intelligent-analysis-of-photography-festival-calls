@@ -85,15 +85,25 @@ export interface GregorianDate {
 }
 
 // Authentication Types
-export interface PasswordActivationInfo {
-  activatedAt: number; // Timestamp of when the password was first activated
-  activatedBy: string; // User identifier who activated it
+export interface ActiveSession {
+  isAuthenticated: boolean;
+  userIdentifier?: string; 
+  sessionStartedAt?: number; // Fallback client-side session start time (less relevant with activation tokens)
+  sessionExpiresAt?: number; // Key's original expiry from server (less relevant now)
+  activationToken?: string; // New: Token received after successful activation
+  activationTokenExpiresAt?: number; // New: Timestamp for when the activationToken expires
 }
 
-export type PasswordActivations = Record<string, PasswordActivationInfo>;
+export interface AuthContextType {
+  activeSession: ActiveSession;
+  login: (password: string) => Promise<void>;
+  logout: () => void;
+  isLoading: boolean;
+  authError: string | null;
+}
 
-export interface ActiveSession {
-  password: string;       // The password used for the current session
-  user: string;           // The user identifier for the current session
-  sessionStartedAt: number; // Timestamp of when this specific session started
+
+// Backup Structure Types
+export interface AppBackup {
+  festivals: FestivalInfo[];
 }

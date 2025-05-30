@@ -2,78 +2,83 @@
 import React, { useState, FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LoadingSpinner } from './LoadingSpinner';
-import { Lock, LogIn, AlertCircle } from 'lucide-react';
+import { ShieldCheck, AlertCircle, LogIn } from 'lucide-react';
+import { APP_TITLE } from '../constants';
+
 
 export const PasswordModal: React.FC = () => {
   const [password, setPassword] = useState('');
-  const { login, loginError, isLoadingAuth } = useAuth(); 
-  const [isAttemptingLogin, setIsAttemptingLogin] = useState(false);
+  const { login, isLoading, authError } = useAuth();
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!password.trim() || isAttemptingLogin) return;
-    setIsAttemptingLogin(true);
-    try {
-      await login(password);
-    } catch (err) {
-      console.error("Unexpected error during login attempt:", err);
-    } finally {
-      setIsAttemptingLogin(false);
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!password.trim()) {
+        // setError directly in context, so it will be displayed
+        login(password); // Let AuthContext handle empty password error from authService
+        return;
     }
+    await login(password);
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-[100]">
+    <div className="fixed inset-0 bg-gray-800 bg-opacity-80 flex items-center justify-center p-4 z-[100]" dir="rtl">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md transform transition-all p-6 sm:p-8">
-        <div className="text-center mb-6">
-          <Lock className="mx-auto h-12 w-12 text-teal-600 mb-3" />
-          <h2 className="text-2xl font-bold text-gray-800">ورود به دستیار هوشمند</h2>
-          <p className="text-sm text-gray-500 mt-1">برای دسترسی به برنامه، لطفاً رمز عبور خود را وارد کنید.</p>
+        <div className="text-center">
+          <img 
+            src="https://i.postimg.cc/c4qbFYRR/image.png" 
+            alt="لوگو برنامه" 
+            className="mx-auto mb-4 rounded-lg shadow-md w-28 h-auto"
+          />
+          <h2 className="text-2xl font-bold text-teal-700 mb-2">ورود به {APP_TITLE}</h2>
+          <p className="text-sm text-gray-600 mb-6">
+            برای دسترسی به امکانات برنامه، لطفاً رمز عبور خود را وارد کنید.
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label htmlFor="password-input" className="sr-only">
               رمز عبور
             </label>
-            <input
-              id="password-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="رمز عبور"
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition text-gray-900 placeholder-gray-500 text-center"
-              disabled={isAttemptingLogin}
-            />
+            <div className="relative">
+              <input
+                id="password-input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="رمز عبور"
+                required
+                className="w-full p-3 ps-10 text-gray-700 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors placeholder-gray-400"
+                aria-describedby={authError ? "password-error" : undefined}
+              />
+              <ShieldCheck className="absolute start-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            </div>
           </div>
 
-          {loginError && (
-            <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm flex items-center">
-              <AlertCircle size={20} className="me-2 flex-shrink-0" />
-              <span className="flex-grow">{loginError}</span>
+          {authError && (
+            <div id="password-error" role="alert" className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-md flex items-center text-sm">
+              <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" />
+              <span className="flex-grow">{authError}</span>
             </div>
           )}
 
-          <div>
-            <button
-              type="submit"
-              disabled={isAttemptingLogin || isLoadingAuth || !password.trim()}
-              className="w-full flex items-center justify-center px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {isAttemptingLogin ? (
-                <LoadingSpinner size="5" color="text-white" />
-              ) : (
-                <>
-                  <LogIn size={20} className="me-2" />
-                  ورود
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full flex items-center justify-center px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <LoadingSpinner size="5" color="text-white" />
+            ) : (
+              <>
+                <LogIn size={20} className="me-2" />
+                ورود
+              </>
+            )}
+          </button>
         </form>
          <p className="text-xs text-gray-400 mt-6 text-center">
-            هر کد رمز عبور تنها یک بار قابل فعال‌سازی است. پس از فعال‌سازی، به مدت ۲۴ ساعت برای کاربر فعال‌کننده معتبر خواهد بود.
+            این برنامه برای استفاده خصوصی طراحی شده است.
         </p>
       </div>
     </div>

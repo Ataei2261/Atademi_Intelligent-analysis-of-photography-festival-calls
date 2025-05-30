@@ -6,7 +6,7 @@ import { FileUploadArea } from './components/FileUploadArea';
 import { FestivalList } from './components/FestivalList';
 import { CalendarView } from './components/CalendarView';
 import { APP_TITLE } from './constants';
-import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, UserCircle, LogOut, ShieldCheck, Clock } from 'lucide-react'; // Added Clock
+import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, LogOut, UserCircle } from 'lucide-react';
 import { FestivalInfo } from './types';
 import { parseJalaliDate, toGregorian } from './utils/dateConverter';
 import { PasswordModal } from './components/PasswordModal';
@@ -22,25 +22,25 @@ function App() {
   return (
     <AuthProvider>
       <FestivalsProvider>
-        <AppShell />
+        <AppContentRouter />
       </FestivalsProvider>
     </AuthProvider>
   );
 }
 
-const AppShell: React.FC = () => {
-  const { isAuthenticated, isLoadingAuth } = useAuth();
+const AppContentRouter: React.FC = () => {
+  const { activeSession, isLoading: authIsLoading } = useAuth();
 
-  if (isLoadingAuth) {
+  if (authIsLoading) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center justify-center" dir="rtl">
-        <LoadingSpinner size="12" color="text-teal-600 dark:text-teal-400" />
-        <p className="mt-4 text-lg text-gray-700 dark:text-gray-300">در حال بارگذاری برنامه...</p>
+        <LoadingSpinner size="12" color="text-teal-600" />
+        <p className="mt-4 text-teal-600">در حال بارگذاری برنامه...</p>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!activeSession.isAuthenticated) {
     return <PasswordModal />;
   }
 
@@ -50,11 +50,13 @@ const AppShell: React.FC = () => {
 
 const AppContentWrapper: React.FC = () => {
   const { festivals, storageError } = useFestivals();
-  const { authenticatedUser, logout, sessionExpiryTimestamp, isAuthenticated } = useAuth(); // Added sessionExpiryTimestamp, isAuthenticated
+  const { logout, activeSession } = useAuth();
   const [criticalDeadlines, setCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [upcomingNonCriticalDeadlines, setUpcomingNonCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [currentView, setCurrentView] = useState<View>(View.Upload);
-  const [timeLeftDisplay, setTimeLeftDisplay] = useState<string>(''); // For countdown timer
+  
+  const [timeLeftDisplay, setTimeLeftDisplay] = useState<string>('');
+
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -133,15 +135,13 @@ const AppContentWrapper: React.FC = () => {
               registration.showNotification(`یادآوری: ${festival.festivalName}`, {
                 body: `مهلت ارسال آثار برای ${festival.festivalName} به زودی (ظرف ۲ روز آینده) به پایان می‌رسد.`,
                 icon: '/logo192.png',
-                tag: `deadline-reminder-${festival.id}` // Use a tag to prevent duplicate notifications
+                tag: `deadline-reminder-${festival.id}` 
               });
             }).catch(err => {
               console.error('Service Worker: Error showing notification:', err);
             });
           } else {
             console.warn('Service Worker not ready or not available for notifications. Notification for "${festival.festivalName}" might not be shown.');
-            // Fallback to direct notification might still cause "Illegal constructor" on some platforms if SW is registered but not active.
-            // The primary fix is using registration.showNotification(). If that path fails, it's an issue with SW readiness.
           }
         }
       });
@@ -154,51 +154,95 @@ const AppContentWrapper: React.FC = () => {
 
     checkAndSetDeadlines(festivals);
   }, [festivals]);
-
-  // Countdown timer effect
+  
   useEffect(() => {
-    if (!isAuthenticated || !sessionExpiryTimestamp) {
+    const LEGACY_SESSION_DURATION_MS_FALLBACK = 24 * 60 * 60 * 1000;
+
+    if (activeSession.isAuthenticated) {
+      const updateTimer = () => {
+        const now = Date.now();
+        let effectiveExpiryTimestamp: number | null = null;
+        let effectiveLabel = "";
+        let effectiveExpiredMessage = "";
+
+        const candidates: { timestamp: number; label: string; expiredMessage: string; type: 'activation' | 'key' | 'legacy' }[] = [];
+
+        // Candidate 1: Activation Token
+        if (activeSession.activationToken && activeSession.activationTokenExpiresAt) {
+          if (activeSession.activationTokenExpiresAt > now) {
+            candidates.push({
+              timestamp: activeSession.activationTokenExpiresAt,
+              label: "زمان انقضای فعال‌سازی:",
+              expiredMessage: "فعال‌سازی منقضی شده",
+              type: 'activation'
+            });
+          }
+        }
+
+        // Candidate 2: Overall Key Expiry (from server)
+        if (activeSession.sessionExpiresAt) {
+          if (activeSession.sessionExpiresAt > now) {
+            candidates.push({
+              timestamp: activeSession.sessionExpiresAt,
+              label: "زمان انقضای کلید اصلی:",
+              expiredMessage: "کلید اصلی منقضی شده",
+              type: 'key'
+            });
+          }
+        }
+        
+        // Candidate 3: Legacy client-side session (only if no server expiries are active candidates)
+        if (candidates.filter(c => c.type === 'activation' || c.type === 'key').length === 0 && activeSession.sessionStartedAt) {
+            const legacyExpiry = activeSession.sessionStartedAt + LEGACY_SESSION_DURATION_MS_FALLBACK;
+            if (legacyExpiry > now) {
+                 candidates.push({
+                    timestamp: legacyExpiry,
+                    label: "زمان باقی‌مانده نشست (محلی):",
+                    expiredMessage: "نشست محلی منقضی شده",
+                    type: 'legacy'
+                });
+            }
+        }
+
+        // Determine the soonest expiry among valid candidates
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => a.timestamp - b.timestamp); // Sort by earliest time
+          const soonest = candidates[0];
+          effectiveExpiryTimestamp = soonest.timestamp;
+          effectiveLabel = soonest.label;
+          effectiveExpiredMessage = soonest.expiredMessage;
+        }
+
+
+        // Handle display if no valid future expiry or if all are past
+        if (effectiveExpiryTimestamp === null || effectiveExpiryTimestamp <= now) {
+          let finalExpiredMessage = "نشست منقضی شده"; // Default
+          // Check in order of importance or likelihood for expired message
+          if (activeSession.activationToken && activeSession.activationTokenExpiresAt && activeSession.activationTokenExpiresAt <= now) {
+            finalExpiredMessage = "فعال‌سازی منقضی شده";
+          } else if (activeSession.sessionExpiresAt && activeSession.sessionExpiresAt <= now) {
+            finalExpiredMessage = "کلید اصلی منقضی شده";
+          } else if (activeSession.sessionStartedAt && (activeSession.sessionStartedAt + LEGACY_SESSION_DURATION_MS_FALLBACK <= now)) {
+            finalExpiredMessage = "نشست محلی منقضی شده";
+          }
+          setTimeLeftDisplay(finalExpiredMessage);
+          // AuthContext handles actual logout separately
+          return;
+        }
+
+        const remaining = effectiveExpiryTimestamp - now;
+        const hours = Math.floor(remaining / (1000 * 60 * 60));
+        const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+        setTimeLeftDisplay(`${effectiveLabel} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
+      };
+
+      updateTimer(); // Initial call
+      const intervalId = setInterval(updateTimer, 30000); // Update every 30 seconds
+      return () => clearInterval(intervalId);
+    } else {
       setTimeLeftDisplay('');
-      return;
     }
-
-    const intervalId = setInterval(() => {
-      const now = Date.now();
-      const timeLeft = sessionExpiryTimestamp - now;
-
-      if (timeLeft <= 0) {
-        setTimeLeftDisplay("منقضی شده");
-        clearInterval(intervalId);
-        // Optional: Call logout() or trigger a re-validation if AuthContext doesn't auto-handle this on next interaction
-        // For now, AuthContext handles actual expiry check on interaction or reload.
-      } else {
-        const totalSeconds = Math.floor(timeLeft / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        setTimeLeftDisplay(
-          `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-        );
-      }
-    }, 1000);
-
-    // Initial call to set time immediately
-    const initialTimeLeft = sessionExpiryTimestamp - Date.now();
-     if (initialTimeLeft <= 0) {
-        setTimeLeftDisplay("منقضی شده");
-        clearInterval(intervalId);
-      } else {
-        const totalSeconds = Math.floor(initialTimeLeft / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        setTimeLeftDisplay(
-          `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-        );
-      }
-
-    return () => clearInterval(intervalId);
-  }, [isAuthenticated, sessionExpiryTimestamp]);
+  }, [activeSession]);
 
 
   return (
@@ -206,22 +250,19 @@ const AppContentWrapper: React.FC = () => {
       <div className="w-full sticky top-0 z-40 backdrop-blur-lg bg-slate-100/80 dark:bg-slate-900/80 shadow-sm">
         <div className="max-w-5xl mx-auto px-4"> 
           <header className="w-full pt-3 pb-2 text-center">
-            <img src="https://i.postimg.cc/rmYvtr2H/Create-a-modern-minimalist-logo-without-any-text-representing-a-multifaceted-photo-analysis-concep.png" alt="لوگو برنامه تحلیلگر فراخوان عکس" className="mx-auto mb-2 rounded-lg shadow-sm w-24 h-auto" />
+            <img src="https://i.postimg.cc/c4qbFYRR/image.png" alt="لوگو برنامه تحلیلگر فراخوان عکس" className="mx-auto mb-2 rounded-lg shadow-sm w-24 h-auto" />
             <h1 className="text-3xl font-bold text-teal-700 dark:text-teal-400">{APP_TITLE}</h1>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               مدیریت فراخوان‌ها؛ تحلیل و انتخاب عکس با توجه به اهداف جشنواره
             </p>
-             {authenticatedUser && (
-              <div className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center justify-center">
-                <ShieldCheck size={14} className="me-1" />
-                وارد شده با: {authenticatedUser}
-              </div>
+            {activeSession.isAuthenticated && activeSession.userIdentifier && (
+                 <div className="text-xs text-teal-600 dark:text-teal-300 mt-1">
+                   <UserCircle size={14} className="inline-block me-1" />
+                   کاربر: <span className="font-semibold">{activeSession.userIdentifier}</span>
+                 </div>
             )}
-            {timeLeftDisplay && (
-              <div className="mt-1 text-xs text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                <Clock size={14} className="me-1" />
-                زمان باقی‌مانده: {timeLeftDisplay}
-              </div>
+             {timeLeftDisplay && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{timeLeftDisplay}</p>
             )}
           </header>
 
@@ -246,13 +287,15 @@ const AppContentWrapper: React.FC = () => {
                 <CalendarDays className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> تقویم
               </button>
             </nav>
-             <button
-                onClick={logout}
-                title={`خروج کاربر ${authenticatedUser}`}
-                className="flex items-center px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm bg-red-500 hover:bg-red-600 text-white transition-colors"
-              >
-                <LogOut size={16} className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> خروج
-            </button>
+             {activeSession.isAuthenticated && (
+                <button
+                    onClick={logout}
+                    className="flex items-center px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-700 transition-colors"
+                    title="خروج از حساب کاربری"
+                >
+                    <LogOut className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> خروج
+                </button>
+            )}
           </div>
         </div>
       </div>

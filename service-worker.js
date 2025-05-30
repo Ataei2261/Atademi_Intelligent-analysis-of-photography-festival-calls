@@ -6,9 +6,9 @@ const urlsToCache = [
   '/manifest.json',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap',
-  'https://i.postimg.cc/rmYvtr2H/Create-a-modern-minimalist-logo-without-any-text-representing-a-multifaceted-photo-analysis-concep.png',
-  '/logo192.png',
-  '/logo512.png'
+  'https://i.postimg.cc/c4qbFYRR/image.png', // Updated logo URL in App.tsx
+  'https://i.postimg.cc/KjHbkYkG/logo192.png', // New PWA icon
+  'https://i.postimg.cc/nVPf1CrZ/logo512.png'  // New PWA icon
 ];
 
 self.addEventListener('install', event => {
@@ -18,8 +18,8 @@ self.addEventListener('install', event => {
         console.log('Opened cache');
         // Filter out CDN URLs that should be fetched directly or are problematic for SW caching.
         return cache.addAll(urlsToCache.filter(url => 
-            !url.startsWith('https://esm.sh') && 
-            !url.startsWith('https://cdnjs.cloudflare.com') &&
+            !url.startsWith('https://esm.sh/') && // Ensure esm.sh is not in initial cache list
+            !url.startsWith('https://cdnjs.cloudflare.com/') &&
             !url.startsWith('https://unpkg.com/') &&
             !url.startsWith('https://cdn.jsdelivr.net/')
         ));
@@ -37,7 +37,8 @@ self.addEventListener('fetch', event => {
   if (
     requestUrl.startsWith('https://cdnjs.cloudflare.com/') || 
     requestUrl.startsWith('https://unpkg.com/') ||
-    requestUrl.startsWith('https://cdn.jsdelivr.net/')
+    requestUrl.startsWith('https://cdn.jsdelivr.net/') ||
+    requestUrl.startsWith('https://esm.sh/') // Added esm.sh to bypass list
   ) {
     // Let the browser handle the request directly.
     return; 
@@ -75,7 +76,8 @@ self.addEventListener('fetch', event => {
             caches.open(CACHE_NAME)
               .then(cache => {
                 // Only cache if it's not a .ts or .tsx file (double check, though handled above)
-                if (!requestUrl.endsWith('.ts') && !requestUrl.endsWith('.tsx')) {
+                // And not an esm.sh URL (also handled above, but good for defense in depth)
+                if (!requestUrl.endsWith('.ts') && !requestUrl.endsWith('.tsx') && !requestUrl.startsWith('https://esm.sh/')) {
                   cache.put(event.request, responseToCache);
                 }
               });

@@ -1,5 +1,5 @@
 
-import { FestivalInfo } from '../types';
+import { FestivalInfo, AppBackup } from '../types';
 
 // Type definitions for File System Access API
 // These might be available in future versions of TypeScript's lib.dom.d.ts
@@ -100,10 +100,11 @@ declare global {
 }
 
 
-export interface FileSystemAccessResult<T = void> {
+export interface FileSystemAccessResult<T = any> { // Changed T default to any to accommodate AppBackup
   success: boolean;
   message: string;
   data?: T;
+  fileName?: string; // Added to return filename on load
 }
 
 export function canUseFileSystemAccessApi(): boolean {
@@ -111,7 +112,7 @@ export function canUseFileSystemAccessApi(): boolean {
 }
 
 const DEFAULT_FILE_OPTIONS: SaveFilePickerOptions = { 
-  suggestedName: 'festivals_backup.json',
+  suggestedName: 'festivals_backup.json', // Updated suggested name
   types: [
     {
       description: 'JSON Files',
@@ -122,22 +123,25 @@ const DEFAULT_FILE_OPTIONS: SaveFilePickerOptions = {
   ],
 };
 
-export async function saveFestivalsToFileSystem(festivals: FestivalInfo[]): Promise<FileSystemAccessResult> {
+export async function saveFestivalsToFileSystem(dataToSave: AppBackup, hasData: boolean): Promise<FileSystemAccessResult> {
   if (!canUseFileSystemAccessApi()) {
     return { success: false, message: 'مرورگر شما از قابلیت ذخیره مستقیم فایل پشتیبانی نمی‌کند.' };
+  }
+  if (!hasData) {
+     return { success: false, message: 'هیچ اطلاعات فراخوانی برای ذخیره وجود ندارد.' }; // Updated message
   }
 
   try {
     const fileHandle = await window.showSaveFilePicker(DEFAULT_FILE_OPTIONS);
     const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(festivals, null, 2)); 
+    await writable.write(JSON.stringify(dataToSave, null, 2)); 
     await writable.close();
-    return { success: true, message: `اطلاعات با موفقیت در فایل "${fileHandle.name}" ذخیره شد.` };
+    return { success: true, message: `اطلاعات فراخوان‌ها با موفقیت در فایل "${fileHandle.name}" ذخیره شد.` }; // Updated message
   } catch (error: any) {
     if (error.name === 'AbortError') {
       return { success: false, message: 'عملیات ذخیره‌سازی توسط کاربر لغو شد.' };
     }
-    console.error('Error saving festivals to file system:', error);
+    console.error('Error saving app data to file system:', error);
     if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('cross origin sub frame')) {
       return { 
         success: false, 
@@ -148,7 +152,7 @@ export async function saveFestivalsToFileSystem(festivals: FestivalInfo[]): Prom
   }
 }
 
-export async function loadFestivalsFromFileSystem(): Promise<FileSystemAccessResult<FestivalInfo[]>> {
+export async function loadFestivalsFromFileSystem(): Promise<FileSystemAccessResult<AppBackup>> {
   if (!canUseFileSystemAccessApi()) {
     return { success: false, message: 'مرورگر شما از قابلیت بارگذاری مستقیم فایل پشتیبانی نمی‌کند.' };
   }
@@ -160,22 +164,30 @@ export async function loadFestivalsFromFileSystem(): Promise<FileSystemAccessRes
     });
     const file = await fileHandle.getFile();
     const contents = await file.text();
-    const parsedData = JSON.parse(contents);
+    const parsedData = JSON.parse(contents) as AppBackup;
 
-    if (!Array.isArray(parsedData)) {
-      throw new Error('فایل انتخاب شده شامل آرایه‌ای از اطلاعات فراخوان‌ها نیست.');
+    // Validate the structure of AppBackup
+    if (typeof parsedData !== 'object' || parsedData === null) {
+        throw new Error('فایل انتخاب شده داده‌های معتبری ندارد.');
     }
-    const isValidData = parsedData.every(item => typeof item === 'object' && item !== null && 'id' in item && ('festivalName' in item || 'fileName' in item) ); // Loosened check slightly
-    if (!isValidData) {
-        throw new Error('ساختار داده‌های داخل فایل نامعتبر است. لطفاً مطمئن شوید فایل پشتیبان صحیح را انتخاب کرده‌اید.');
+    if (!Array.isArray(parsedData.festivals)) {
+      throw new Error('فایل انتخاب شده شامل آرایه‌ای از اطلاعات فراخوان‌ها (festivals) نیست.');
     }
+    // Basic validation for FestivalInfo structure within the festivals array
+    const isValidFestivalData = parsedData.festivals.every(
+        (item: any) => typeof item === 'object' && item !== null && 'id' in item && ('festivalName' in item || 'fileName' in item)
+    );
+    if (!isValidFestivalData) {
+        throw new Error('ساختار داده‌های فراخوان‌ها داخل فایل نامعتبر است.');
+    }
+    // Removed validation for authContextData
 
-    return { success: true, message: `اطلاعات از فایل "${file.name}" با موفقیت بارگذاری شد.`, data: parsedData as FestivalInfo[] };
+    return { success: true, message: `اطلاعات از فایل "${file.name}" با موفقیت بارگذاری شد.`, data: parsedData, fileName: file.name };
   } catch (error: any) {
     if (error.name === 'AbortError') {
       return { success: false, message: 'عملیات بارگذاری توسط کاربر لغو شد.' };
     }
-    console.error('Error loading festivals from file system:', error);
+    console.error('Error loading app data from file system:', error);
      if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('cross origin sub frame')) {
       return { 
         success: false, 
@@ -186,7 +198,7 @@ export async function loadFestivalsFromFileSystem(): Promise<FileSystemAccessRes
   }
 }
 
-export async function readJsonFromFile(file: File): Promise<FileSystemAccessResult<FestivalInfo[]>> {
+export async function readJsonFromFile(file: File): Promise<FileSystemAccessResult<AppBackup>> {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -195,30 +207,32 @@ export async function readJsonFromFile(file: File): Promise<FileSystemAccessResu
         if (!contents) {
           throw new Error('فایل خالی است یا قابل خواندن نیست.');
         }
-        const parsedData = JSON.parse(contents);
+        const parsedData = JSON.parse(contents) as AppBackup;
 
-        if (!Array.isArray(parsedData)) {
-          throw new Error('فایل انتخاب شده شامل آرایه‌ای از اطلاعات فراخوان‌ها نیست.');
+        if (typeof parsedData !== 'object' || parsedData === null) {
+            throw new Error('فایل انتخاب شده داده‌های معتبری ندارد.');
         }
-        // Basic validation for FestivalInfo structure
-        const isValidData = parsedData.every(
-          item => typeof item === 'object' && item !== null && 'id' in item && ('festivalName' in item || 'fileName' in item)
+        if (!Array.isArray(parsedData.festivals)) {
+          throw new Error('فایل انتخاب شده شامل آرایه‌ای از اطلاعات فراخوان‌ها (festivals) نیست.');
+        }
+        const isValidFestivalData = parsedData.festivals.every(
+          (item: any) => typeof item === 'object' && item !== null && 'id' in item && ('festivalName' in item || 'fileName' in item)
         );
-        if (!isValidData) {
-          throw new Error('ساختار داده‌های داخل فایل نامعتبر است. لطفاً مطمئن شوید فایل پشتیبان صحیح را انتخاب کرده‌اید.');
+        if (!isValidFestivalData) {
+          throw new Error('ساختار داده‌های فراخوان‌ها داخل فایل نامعتبر است.');
         }
-        resolve({ success: true, message: `اطلاعات از فایل "${file.name}" با موفقیت بارگذاری و پردازش شد.`, data: parsedData as FestivalInfo[] });
+        // Removed validation for authContextData
+        resolve({ success: true, message: `اطلاعات از فایل "${file.name}" با موفقیت بارگذاری و پردازش شد.`, data: parsedData, fileName: file.name });
       } catch (error: any) {
         console.error('Error reading or parsing JSON from file:', error);
         resolve({ success: false, message: `خطا در خواندن یا پردازش فایل JSON: ${error.message}` });
       }
     };
-    reader.onerror = (eventError) => { // eventError is ProgressEvent<FileReader>
+    reader.onerror = (eventError) => { 
       console.error('FileReader error event:', eventError);
-      // The actual error is in reader.error
       const errorMessage = reader.error?.message || 'Unknown FileReader error';
       resolve({ success: false, message: `خطا در خواندن فایل: ${errorMessage}` });
     };
-    reader.readAsText(file, 'UTF-8'); // Specify UTF-8 encoding
+    reader.readAsText(file, 'UTF-8'); 
   });
 }

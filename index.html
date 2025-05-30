@@ -98,13 +98,14 @@
   "imports": {
     "react": "https://esm.sh/react@^19.1.0",
     "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
-    "pdfjs-dist": "https://esm.sh/pdfjs-dist@5.2.133",
+    "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.2.133/build/pdf.min.mjs",
     "react/": "https://esm.sh/react@^19.1.0/",
     "lucide-react": "https://esm.sh/lucide-react@^0.511.0",
     "jszip": "https://esm.sh/jszip@^3.10.1",
     "@google/genai": "https://esm.sh/@google/genai@^1.2.0",
-    "pdfjs-dist/": "https://esm.sh/pdfjs-dist@5.2.133/",
-    "jalaali-js": "https://esm.sh/jalaali-js@^1.2.8"
+    "pdfjs-dist/": "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.2.133/",
+    "jalaali-js": "https://esm.sh/jalaali-js@^1.2.8",
+    "@/App": "./App.tsx"
   }
 }
 </script>
@@ -118,6 +119,11 @@
         navigator.serviceWorker.register('/service-worker.js')
           .then(registration => {
             console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            // Optional: Listen for controller change to reload if necessary
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              console.log('Service Worker controller has changed. Reloading page...');
+              window.location.reload();
+            });
           })
           .catch(error => {
             console.log('ServiceWorker registration failed: ', error);
