@@ -4,7 +4,7 @@ import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalInfo, ExtractedData, FestivalSourceFile } from '../types';
 import { extractTextFromPdf, fileToBase64 } from '../services/fileProcessingService';
 import { extractTextFromImageViaGemini, extractFestivalInfoFromTextViaGemini } from '../services/geminiService';
-import { UploadCloud, FileText, Type, AlertCircle, CheckCircle, X, Image as ImageIcon, AlertTriangle, Edit2, XCircle } from 'lucide-react';
+import { UploadCloud, FileText, Type, AlertCircle, CheckCircle, X, Image as ImageIcon, AlertTriangle, Edit2, XCircle, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { FestivalModal } from './FestivalModal';
 
@@ -30,7 +30,6 @@ export const FileUploadArea: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [initialModalData, setInitialModalData] = useState<Partial<FestivalInfo> | null>(null);
 
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const currentOperationAbortControllerRef = useRef<AbortController | null>(null);
 
 
@@ -59,11 +58,10 @@ export const FileUploadArea: React.FC = () => {
 
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    // Clear previous general error/processing messages and text input
     setError(null);
     setProcessingMessage(null);
     setProcessingWarning(null);
-    setTextInput(''); // Clear text input as file input takes precedence
+    setTextInput(''); 
     if (currentOperationAbortControllerRef.current) {
         currentOperationAbortControllerRef.current.abort();
         currentOperationAbortControllerRef.current = null;
@@ -74,7 +72,6 @@ export const FileUploadArea: React.FC = () => {
     const currentFileInput = event.target;
 
     if (files && files.length > 0) {
-      // Clear previous file-specific states before processing new ones
       setSelectedFiles([]);
       setFilePreviews([]);
       setPdfPreview(false);
@@ -89,7 +86,7 @@ export const FileUploadArea: React.FC = () => {
       if (isPdfSelected && newFilesArray.length > 1) {
         setError('فقط یک فایل PDF قابل انتخاب است. برای بارگذاری چندین فایل، همه باید تصویر باشند.');
         setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-        if (currentFileInput) currentFileInput.value = ''; // Clear the actual input element
+        if (currentFileInput) currentFileInput.value = ''; 
         return;
       }
       if (isPdfSelected && newFilesArray.length === 1) {
@@ -106,7 +103,7 @@ export const FileUploadArea: React.FC = () => {
           } catch (err) {
             setError(`خطا در خواندن فایل ${file.name}`);
             setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-            if (currentFileInput) currentFileInput.value = ''; // Clear the actual input element
+            if (currentFileInput) currentFileInput.value = ''; 
             return;
           }
         }
@@ -115,12 +112,10 @@ export const FileUploadArea: React.FC = () => {
       } else if (newFilesArray.length > 0) { 
         setError('ترکیب فایل نامعتبر است. لطفاً یا یک فایل PDF، یا یک یا چند فایل تصویر (JPG/PNG) انتخاب کنید.');
         setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-        if (currentFileInput) currentFileInput.value = ''; // Clear the actual input element
+        if (currentFileInput) currentFileInput.value = ''; 
         return;
       }
-      // Successfully processed files, file input element value remains for now
     } else {
-      // No files selected (e.g., user cancelled file dialog)
       setSelectedFiles([]);
       setFilePreviews([]);
       setPdfPreview(false);
@@ -128,7 +123,6 @@ export const FileUploadArea: React.FC = () => {
   };
   
   const handleTextInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    // When text input changes, clear file selections and related states, including the file input element
     setSelectedFiles([]);
     setFilePreviews([]);
     setPdfPreview(false);
@@ -140,7 +134,7 @@ export const FileUploadArea: React.FC = () => {
         currentOperationAbortControllerRef.current = null;
     }
     const fileInput = document.getElementById('file-upload') as HTMLInputElement;
-    if (fileInput) fileInput.value = ''; // Clear the actual file input element
+    if (fileInput) fileInput.value = ''; 
 
     setTextInput(event.target.value);
   };
@@ -177,11 +171,11 @@ export const FileUploadArea: React.FC = () => {
           sourceDataUrl: pdfPreview ? await fileToBase64(selectedFiles[0]) : (filePreviews.length > 0 ? filePreviews[0] : undefined),
           sourceFiles: await Promise.all(selectedFiles.map(async (file, idx) => ({
             name: file.name,
-            dataUrl: pdfPreview ? await fileToBase64(file) : filePreviews[idx], // Use existing previews for images
+            dataUrl: pdfPreview ? await fileToBase64(file) : filePreviews[idx], 
             type: file.type,
           }))),
         };
-      } else { // source === 'text'
+      } else { 
          newFestival = {
           ...newFestival,
           fileName: festivalInfoFileName,
@@ -204,7 +198,7 @@ export const FileUploadArea: React.FC = () => {
         'Operation aborted by user after Gemini extraction'
       ];
 
-      if (err.name === 'AbortError' || (typeof err.message === 'string' && knownAbortMessages.includes(err.message))) {
+      if (err.name === 'AbortError' || (typeof err.message === 'string' && (knownAbortMessages.includes(err.message) || err.message.includes("Operation aborted")))) {
         setError('عملیات پردازش توسط کاربر لغو شد.');
         setProcessingMessage(null);
       } else {
@@ -213,6 +207,8 @@ export const FileUploadArea: React.FC = () => {
             (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
             (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
           displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { // Handle the specific error from prompt
+             displayError = `خطا در پردازش اطلاعات: ${err.message}`; // Keep the specific abort message for retry logic
         }
         setError(displayError);
         setProcessingMessage(null);
@@ -245,7 +241,7 @@ export const FileUploadArea: React.FC = () => {
       if (pdfPreview && selectedFiles.length === 1) {
         const pdfFile = selectedFiles[0];
         setProcessingMessage('در حال استخراج متن از PDF...');
-        extractedText = await extractTextFromPdf(pdfFile); // PDF extraction itself doesn't support AbortSignal easily
+        extractedText = await extractTextFromPdf(pdfFile); 
         if (controller.signal.aborted) throw new DOMException('Operation aborted during PDF processing', 'AbortError');
       } else if (filePreviews.length > 0 && selectedFiles.length > 0) {
         setProcessingMessage(`در حال استخراج متن از ${selectedFiles.length} تصویر با Gemini...`);
@@ -294,7 +290,7 @@ export const FileUploadArea: React.FC = () => {
         'Operation aborted during image loop',
         'Operation aborted before final processing'
       ];
-      if (err.name === 'AbortError' || (typeof err.message === 'string' && knownFileAbortMessages.includes(err.message))) {
+      if (err.name === 'AbortError' || (typeof err.message === 'string' && (knownFileAbortMessages.includes(err.message) || err.message.includes("Operation aborted")))) {
         setError('عملیات پردازش توسط کاربر لغو شد.');
         setProcessingMessage(null);
       } else {
@@ -303,6 +299,8 @@ export const FileUploadArea: React.FC = () => {
             (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
             (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
           displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
+        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { // Handle the specific error from prompt
+            displayError = `خطا در پردازش فایل(ها): ${err.message}`; // Keep the specific abort message for retry logic
         }
         setError(displayError);
         setProcessingMessage(null);
@@ -351,13 +349,13 @@ export const FileUploadArea: React.FC = () => {
   };
 
   const handleCancelWarning = () => {
-    resetInputState(); // This will clear the file input element as well
+    resetInputState(); 
   };
 
   const handleSaveFromModal = (festivalData: FestivalInfo) => {
     addFestival(festivalData);
     setShowModal(false);
-    resetInputState(); // Clear all inputs after successful save
+    resetInputState(); 
     setProcessingMessage('فراخوان با موفقیت اضافه شد.');
      setTimeout(() => setProcessingMessage(null), 3000);
   };
@@ -365,10 +363,18 @@ export const FileUploadArea: React.FC = () => {
   const handleCancelModal = () => {
     setShowModal(false);
     setInitialModalData(null);
-    // Do not resetInputState here if user might want to retry with same file/text.
-    // However, if the modal was for a *new* entry that was cancelled, clearing inputs might be desired.
-    // For now, keeping inputs intact after modal cancel. resetInputState() can be called if explicit clear is needed.
   };
+
+  const isErrorRetryable = error && 
+                           (error.includes("لغو شد") || // User-facing "Cancelled" message
+                            error.includes("Operation aborted") || // System-level AbortError messages like "Operation aborted by user post-API call"
+                            (error.includes("Gemini API") &&  // General Gemini errors (non-API key, non-init)
+                             !error.toLowerCase().includes("api_key") && 
+                             !error.toLowerCase().includes("api key") && 
+                             !error.toLowerCase().includes("environment") &&
+                             !error.toLowerCase().includes("not initialized")) ||
+                            (error.toLowerCase().includes("failed to fetch") || error.toLowerCase().includes("networkerror")) // Network errors
+                           );
 
 
   return (
@@ -437,19 +443,38 @@ export const FileUploadArea: React.FC = () => {
         </>
       )}
 
-      {error && (
+      {error && !isLoading && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md flex items-center text-sm">
           <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" /> 
-          <span className="flex-grow">{error}</span>
-           <button onClick={() => { setError(null); if(isLoading) {handleCancelProcessing();} }} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0">
-            <X size={18} />
-          </button>
+          <span className="flex-grow whitespace-pre-wrap">{error}</span>
+          {isErrorRetryable ? (
+            <button
+              onClick={() => {
+                setError(null); 
+                if (selectedFiles.length > 0) {
+                  processFile();
+                } else if (textInput.trim() !== '') {
+                  processTextInput();
+                } else {
+                  setError("ابتدا فایل یا متنی را برای پردازش مجدد انتخاب/وارد کنید.");
+                }
+              }}
+              className="ms-2 px-2 py-0.5 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 flex items-center"
+              title="تلاش مجدد برای پردازش"
+            >
+              <RefreshCw size={14} className="me-1" /> تلاش مجدد
+            </button>
+          ) : (
+            <button onClick={() => { setError(null); if(isLoading) {handleCancelProcessing();} }} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0 p-1">
+              <X size={18} />
+            </button>
+          )}
         </div>
       )}
       {processingMessage && !error && !isLoading && !processingWarning && (
          <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md flex items-center text-sm">
           <CheckCircle className="h-5 w-5 me-2" /> {processingMessage}
-           <button onClick={() => setProcessingMessage(null)} className="ms-auto text-green-700 hover:text-green-900">
+           <button onClick={() => setProcessingMessage(null)} className="ms-auto text-green-700 hover:text-green-900 p-1">
             <X size={18} />
           </button>
         </div>
