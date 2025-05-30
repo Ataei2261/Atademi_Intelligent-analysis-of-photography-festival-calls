@@ -3,7 +3,7 @@ export const APP_TITLE = "دستیار هوشمند فراخوان‌های عک
 export const GEMINI_MODEL_TEXT = "gemini-2.5-flash-preview-04-17";
 export const GEMINI_MODEL_VISION = "gemini-2.5-flash-preview-04-17"; // Or specific vision model if different and better for OCR
 
-export const AUTH_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby40tYpHRUjs1Hbvtu6wdSkSuFO4yI1SqCOL2f9AHw7IQ8AnkTZz9G4dzpPDY3O64cU6Q/exec";
+export const AUTH_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxTyIDUg_c1OGDoAkbf7zK9CSw58dxO4AOS2n-JXZaJmL53spamSwcMAfDnHEZbsM-gQ/exec";
 
 export const PERSIAN_MONTH_NAMES = [
   "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
