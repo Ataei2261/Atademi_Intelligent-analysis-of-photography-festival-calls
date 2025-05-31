@@ -18,7 +18,8 @@ interface ProcessingWarning {
 }
 
 export const FileUploadArea: React.FC = () => {
-  const { addFestival, setIsLoading, isLoading } = useFestivals();
+  const { addFestival, isLoading: contextIsLoading } = useFestivals();
+  const [isSelfProcessing, setIsSelfProcessing] = useState<boolean>(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<string[]>([]); 
   const [pdfPreview, setPdfPreview] = useState<boolean>(false); 
@@ -140,7 +141,7 @@ export const FileUploadArea: React.FC = () => {
   };
 
   const _actuallyProcessData = async (data: string, source: 'file' | 'text', signal: AbortSignal, originalFileNameForText?: string) => {
-    setIsLoading(true);
+    setIsSelfProcessing(true);
     setError(null);
     setProcessingWarning(null);
     setProcessingMessage('در حال تحلیل متن و استخراج اطلاعات با Gemini...');
@@ -214,7 +215,7 @@ export const FileUploadArea: React.FC = () => {
         setProcessingMessage(null);
       }
     } finally {
-      setIsLoading(false);
+      setIsSelfProcessing(false);
       currentOperationAbortControllerRef.current = null;
     }
   };
@@ -230,7 +231,7 @@ export const FileUploadArea: React.FC = () => {
     currentOperationAbortControllerRef.current = controller;
 
 
-    setIsLoading(true);
+    setIsSelfProcessing(true);
     setError(null);
     setProcessingWarning(null);
     setProcessingMessage('در حال آماده‌سازی فایل(ها)...');
@@ -262,7 +263,7 @@ export const FileUploadArea: React.FC = () => {
             message: 'متن بسیار کمی از تصویر(های) انتخاب شده استخراج شد. این تصویر(ها) ممکن است برای تحلیل فراخوان مناسب نباشد.',
             dataToProcess: extractedText || ""
           });
-          setIsLoading(false);
+          setIsSelfProcessing(false);
           setProcessingMessage(null);
           currentOperationAbortControllerRef.current = null;
           return;
@@ -305,10 +306,10 @@ export const FileUploadArea: React.FC = () => {
         setError(displayError);
         setProcessingMessage(null);
       }
-      setIsLoading(false);
+      setIsSelfProcessing(false);
       currentOperationAbortControllerRef.current = null;
     }
-  }, [selectedFiles, filePreviews, pdfPreview, setIsLoading]);
+  }, [selectedFiles, filePreviews, pdfPreview, setIsSelfProcessing]);
 
   const processTextInput = useCallback(async () => {
     const trimmedText = textInput.trim();
@@ -320,7 +321,7 @@ export const FileUploadArea: React.FC = () => {
     const controller = new AbortController();
     currentOperationAbortControllerRef.current = controller;
 
-    setIsLoading(true);
+    setIsSelfProcessing(true);
     setError(null);
     setProcessingWarning(null);
     
@@ -330,14 +331,14 @@ export const FileUploadArea: React.FC = () => {
         message: 'متن وارد شده بسیار کوتاه است. ممکن است برای تحلیل دقیق اطلاعات کافی نباشد.',
         dataToProcess: textInput 
       });
-      setIsLoading(false);
+      setIsSelfProcessing(false);
       currentOperationAbortControllerRef.current = null;
       return;
     }
     
     await _actuallyProcessData(textInput, 'text', controller.signal);
 
-  }, [textInput, setIsLoading]);
+  }, [textInput, setIsSelfProcessing]);
 
   const handleProceedWithWarning = () => {
     if (processingWarning?.dataToProcess !== undefined) {
@@ -376,6 +377,7 @@ export const FileUploadArea: React.FC = () => {
                             (error.toLowerCase().includes("failed to fetch") || error.toLowerCase().includes("networkerror")) // Network errors
                            );
 
+  const currentLoadingState = isSelfProcessing || contextIsLoading;
 
   return (
     <div className="w-full p-6 bg-white rounded-xl shadow-xl">
@@ -386,7 +388,7 @@ export const FileUploadArea: React.FC = () => {
           <div className="mb-6">
             <label htmlFor="file-upload" className="cursor-pointer group">
               <div className={`w-full h-40 border-2 border-dashed rounded-lg flex flex-col justify-center items-center transition-colors group-hover:border-teal-500 group-hover:bg-teal-50 ${pdfPreview || filePreviews.length > 0 ? 'border-teal-400 bg-teal-50' : 'border-gray-300'}`}>
-                {isLoading && selectedFiles.length > 0 && processingMessage ? (
+                {isSelfProcessing && selectedFiles.length > 0 && processingMessage ? (
                    <div className="flex flex-col items-center text-teal-600">
                     <LoadingSpinner size="8" />
                   </div>
@@ -437,13 +439,13 @@ export const FileUploadArea: React.FC = () => {
               placeholder="مثال: فراخوان مسابقه عکاسی «نگاهی به شهر من» با موضوعات معماری، زندگی شهری و طبیعت شهری برگزار می‌شود. مهلت ارسال آثار تا تاریخ ۱۴۰۳/۰۸/۱۵..."
               rows={6}
               className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-shadow"
-              disabled={isLoading}
+              disabled={currentLoadingState}
             />
           </div>
         </>
       )}
 
-      {error && !isLoading && (
+      {error && !isSelfProcessing && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md flex items-center text-sm">
           <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" /> 
           <span className="flex-grow whitespace-pre-wrap">{error}</span>
@@ -465,13 +467,13 @@ export const FileUploadArea: React.FC = () => {
               <RefreshCw size={14} className="me-1" /> تلاش مجدد
             </button>
           ) : (
-            <button onClick={() => { setError(null); if(isLoading) {handleCancelProcessing();} }} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0 p-1">
+            <button onClick={() => { setError(null); if(isSelfProcessing) {handleCancelProcessing();} }} className="ms-auto text-red-700 hover:text-red-900 flex-shrink-0 p-1">
               <X size={18} />
             </button>
           )}
         </div>
       )}
-      {processingMessage && !error && !isLoading && !processingWarning && (
+      {processingMessage && !error && !isSelfProcessing && !processingWarning && (
          <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md flex items-center text-sm">
           <CheckCircle className="h-5 w-5 me-2" /> {processingMessage}
            <button onClick={() => setProcessingMessage(null)} className="ms-auto text-green-700 hover:text-green-900 p-1">
@@ -479,7 +481,7 @@ export const FileUploadArea: React.FC = () => {
           </button>
         </div>
       )}
-       {isLoading && processingMessage && !processingWarning && (
+       {isSelfProcessing && processingMessage && !processingWarning && (
         <div className="mb-4 p-3 bg-blue-100 text-blue-700 rounded-md flex items-center text-sm">
           <LoadingSpinner size="5" className="me-2"/> 
           <span className="flex-grow">{processingMessage}</span>
@@ -493,7 +495,7 @@ export const FileUploadArea: React.FC = () => {
         </div>
       )}
 
-      {processingWarning && !isLoading && (
+      {processingWarning && !isSelfProcessing && (
         <div className="p-4 mb-4 bg-yellow-100 border-r-4 border-yellow-500 text-yellow-800 rounded-md shadow">
           <div className="flex items-start">
             <AlertTriangle className="h-6 w-6 me-3 text-yellow-600 flex-shrink-0" />
@@ -522,19 +524,20 @@ export const FileUploadArea: React.FC = () => {
       {!processingWarning && !showModal && (
         <div className="flex flex-col sm:flex-row gap-4 mt-6">
           <button
+            id="tour-process-file-button"
             onClick={processFile}
-            disabled={selectedFiles.length === 0 || isLoading}
+            disabled={selectedFiles.length === 0 || currentLoadingState}
             className="flex-1 px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:bg-gray-400 disabled:text-gray-700 disabled:cursor-not-allowed flex items-center justify-center"
           >
-            {isLoading && selectedFiles.length > 0 ? <LoadingSpinner /> : <UploadCloud className="me-2 h-5 w-5" />}
+            {isSelfProcessing && selectedFiles.length > 0 ? <LoadingSpinner /> : <UploadCloud className="me-2 h-5 w-5" />}
             پردازش فایل(ها)
           </button>
           <button
             onClick={processTextInput}
-            disabled={textInput.trim() === '' || isLoading}
+            disabled={textInput.trim() === '' || currentLoadingState}
             className="flex-1 px-6 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-700 transition-colors disabled:bg-gray-400 disabled:text-gray-700 disabled:cursor-not-allowed flex items-center justify-center"
           >
-            {isLoading && textInput.trim() !== '' ? <LoadingSpinner /> : <Type className="me-2 h-5 w-5" />}
+            {isSelfProcessing && textInput.trim() !== '' ? <LoadingSpinner /> : <Type className="me-2 h-5 w-5" />}
             پردازش متن وارد شده
           </button>
         </div>

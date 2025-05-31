@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 
 export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>, Error | null] {
@@ -29,7 +30,7 @@ export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dis
     try {
       if (typeof window !== 'undefined') {
         const valueToStore = JSON.stringify(storedValue);
-        console.log(`[useLocalStorage] Persisting to localStorage for key "${key}". Data length: ${valueToStore.length}`);
+        // console.log(`[useLocalStorage] Persisting to localStorage for key "${key}". Data length: ${valueToStore.length}`);
         window.localStorage.setItem(key, valueToStore);
         if (storageError !== null) { // Clear previous error if save succeeds
             setStorageError(null);
@@ -40,7 +41,7 @@ export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dis
       console.error(`[useLocalStorage] Error setting localStorage key "${key}":`, castError);
       setStorageError(castError);
     }
-  }, [key, storedValue]); // storageError is not needed in dependency array as setStorageError is stable
+  }, [key, storedValue]);
 
   return [storedValue, setStoredValue, storageError];
 }

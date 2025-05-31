@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect } from 'react';
 import { FestivalsProvider, useFestivals } from './contexts/FestivalsContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -6,11 +8,17 @@ import { FileUploadArea } from './components/FileUploadArea';
 import { FestivalList } from './components/FestivalList';
 import { CalendarView } from './components/CalendarView';
 import { APP_TITLE } from './constants';
-import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, LogOut, UserCircle } from 'lucide-react';
+import { AlertTriangle, CalendarDays, ListChecks, UploadCloud, LogOut, UserCircle, HelpCircle } from 'lucide-react'; // Added HelpCircle
 import { FestivalInfo } from './types';
 import { parseJalaliDate, toGregorian } from './utils/dateConverter';
 import { PasswordModal } from './components/PasswordModal';
 import { LoadingSpinner } from './components/LoadingSpinner';
+import { InteractiveTour } from './components/InteractiveTour'; 
+import { useLocalStorage } from './hooks/useLocalStorage'; 
+
+const TOUR_COMPLETED_KEY = 'photoContestAnalyzerTourCompleted_v1';
+const HELP_BUTTON_VISIBLE_KEY = 'photoContestAnalyzerHelpButtonVisible_v1';
+
 
 enum View {
   Upload = 'upload',
@@ -30,15 +38,24 @@ function App() {
 
 const AppContentRouter: React.FC = () => {
   const { activeSession, isLoading: authIsLoading } = useAuth();
+  const { isLoading: festivalsAreLoading, festivals, dbError } = useFestivals();
 
-  if (authIsLoading) {
+
+  if (authIsLoading || (festivalsAreLoading && festivals.length === 0 && !dbError)) { // Show loading if auth is loading OR festivals are loading initially without errors
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center justify-center" dir="rtl">
         <LoadingSpinner size="12" color="text-teal-600" />
         <p className="mt-4 text-teal-600">در حال بارگذاری برنامه...</p>
+         {dbError && ( // Display DB error during initial load if it occurs
+          <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-md shadow-md max-w-md text-center">
+            <AlertTriangle className="inline-block me-2" />
+            خطا در بارگذاری داده‌های اولیه: {dbError.message}. لطفاً صفحه را رفرش کنید.
+          </div>
+        )}
       </div>
     );
   }
+
 
   if (!activeSession.isAuthenticated) {
     return <PasswordModal />;
@@ -49,13 +66,52 @@ const AppContentRouter: React.FC = () => {
 
 
 const AppContentWrapper: React.FC = () => {
-  const { festivals, storageError } = useFestivals();
-  const { logout, activeSession } = useAuth();
+  const { festivals, dbError: festivalsDbError } = useFestivals(); // Renamed storageError to dbError
+  const { logout, activeSession, isLoading: authContextIsLoading } = useAuth(); 
   const [criticalDeadlines, setCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [upcomingNonCriticalDeadlines, setUpcomingNonCriticalDeadlines] = useState<FestivalInfo[]>([]);
   const [currentView, setCurrentView] = useState<View>(View.Upload);
   
   const [timeLeftDisplay, setTimeLeftDisplay] = useState<string>('');
+
+  const [hasCompletedTour, setHasCompletedTour] = useLocalStorage<boolean>(TOUR_COMPLETED_KEY, false);
+  const [isTourActive, setIsTourActive] = useState<boolean>(false);
+  const [currentTourStep, setCurrentTourStep] = useState<number>(0);
+  // New state to control help button visibility based on tour completion
+  const [showHelpButtonVisibility, setShowHelpButtonVisibility] = useLocalStorage<boolean>(HELP_BUTTON_VISIBLE_KEY, false);
+
+
+  useEffect(() => {
+    if (activeSession.isAuthenticated && !authContextIsLoading && !hasCompletedTour && !showHelpButtonVisibility) {
+      const timer = setTimeout(() => {
+        setIsTourActive(true);
+        setCurrentTourStep(0); 
+      }, 700); 
+      return () => clearTimeout(timer);
+    }
+  }, [activeSession.isAuthenticated, authContextIsLoading, hasCompletedTour, showHelpButtonVisibility]);
+
+  const handleCompleteTour = () => {
+    setIsTourActive(false);
+    setHasCompletedTour(true);
+    setShowHelpButtonVisibility(true); // Make help button visible after first tour completion
+  };
+
+  const startTourManually = () => {
+    setIsTourActive(true);
+    setCurrentTourStep(0); // Always start from the beginning
+  };
+
+  useEffect(() => {
+    if (isTourActive) {
+      document.body.classList.add('tour-active');
+    } else {
+      document.body.classList.remove('tour-active');
+    }
+    return () => { 
+      document.body.classList.remove('tour-active');
+    };
+  }, [isTourActive]);
 
 
   useEffect(() => {
@@ -167,7 +223,6 @@ const AppContentWrapper: React.FC = () => {
 
         const candidates: { timestamp: number; label: string; expiredMessage: string; type: 'activation' | 'key' | 'legacy' }[] = [];
 
-        // Candidate 1: Activation Token
         if (activeSession.activationToken && activeSession.activationTokenExpiresAt) {
           if (activeSession.activationTokenExpiresAt > now) {
             candidates.push({
@@ -179,7 +234,6 @@ const AppContentWrapper: React.FC = () => {
           }
         }
 
-        // Candidate 2: Overall Key Expiry (from server)
         if (activeSession.sessionExpiresAt) {
           if (activeSession.sessionExpiresAt > now) {
             candidates.push({
@@ -191,7 +245,6 @@ const AppContentWrapper: React.FC = () => {
           }
         }
         
-        // Candidate 3: Legacy client-side session (only if no server expiries are active candidates)
         if (candidates.filter(c => c.type === 'activation' || c.type === 'key').length === 0 && activeSession.sessionStartedAt) {
             const legacyExpiry = activeSession.sessionStartedAt + LEGACY_SESSION_DURATION_MS_FALLBACK;
             if (legacyExpiry > now) {
@@ -204,9 +257,8 @@ const AppContentWrapper: React.FC = () => {
             }
         }
 
-        // Determine the soonest expiry among valid candidates
         if (candidates.length > 0) {
-          candidates.sort((a, b) => a.timestamp - b.timestamp); // Sort by earliest time
+          candidates.sort((a, b) => a.timestamp - b.timestamp); 
           const soonest = candidates[0];
           effectiveExpiryTimestamp = soonest.timestamp;
           effectiveLabel = soonest.label;
@@ -214,10 +266,8 @@ const AppContentWrapper: React.FC = () => {
         }
 
 
-        // Handle display if no valid future expiry or if all are past
         if (effectiveExpiryTimestamp === null || effectiveExpiryTimestamp <= now) {
-          let finalExpiredMessage = "نشست منقضی شده"; // Default
-          // Check in order of importance or likelihood for expired message
+          let finalExpiredMessage = "نشست منقضی شده"; 
           if (activeSession.activationToken && activeSession.activationTokenExpiresAt && activeSession.activationTokenExpiresAt <= now) {
             finalExpiredMessage = "فعال‌سازی منقضی شده";
           } else if (activeSession.sessionExpiresAt && activeSession.sessionExpiresAt <= now) {
@@ -226,7 +276,6 @@ const AppContentWrapper: React.FC = () => {
             finalExpiredMessage = "نشست محلی منقضی شده";
           }
           setTimeLeftDisplay(finalExpiredMessage);
-          // AuthContext handles actual logout separately
           return;
         }
 
@@ -236,8 +285,8 @@ const AppContentWrapper: React.FC = () => {
         setTimeLeftDisplay(`${effectiveLabel} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
       };
 
-      updateTimer(); // Initial call
-      const intervalId = setInterval(updateTimer, 30000); // Update every 30 seconds
+      updateTimer(); 
+      const intervalId = setInterval(updateTimer, 30000); 
       return () => clearInterval(intervalId);
     } else {
       setTimeLeftDisplay('');
@@ -269,82 +318,99 @@ const AppContentWrapper: React.FC = () => {
           <div className="w-full max-w-3xl mx-auto bg-white/40 dark:bg-slate-700/40 shadow-md rounded-lg p-2 mb-3 flex justify-between items-center">
             <nav className="flex justify-start space-s-2 sm:space-s-3">
               <button
+                id="tour-nav-upload"
                 onClick={() => setCurrentView(View.Upload)}
                 className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.Upload ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
               >
                 <UploadCloud className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> بارگذاری
               </button>
               <button
+                id="tour-nav-list"
                 onClick={() => setCurrentView(View.List)}
                 className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.List ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
               >
                 <ListChecks className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> لیست
               </button>
               <button
+                id="tour-nav-calendar"
                 onClick={() => setCurrentView(View.Calendar)}
                 className={`flex items-center px-2 sm:px-4 py-2 rounded-md transition-colors duration-200 ease-in-out text-xs sm:text-sm ${currentView === View.Calendar ? 'bg-teal-600 text-white dark:bg-teal-500' : 'text-gray-700 hover:bg-teal-100 dark:text-gray-300 dark:hover:bg-teal-700'}`}
               >
                 <CalendarDays className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> تقویم
               </button>
             </nav>
-             {activeSession.isAuthenticated && (
-                <button
-                    onClick={logout}
-                    className="flex items-center px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-700 transition-colors"
-                    title="خروج از حساب کاربری"
-                >
-                    <LogOut className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> خروج
-                </button>
-            )}
+            <div className="flex items-center space-s-1 sm:space-s-2">
+                {showHelpButtonVisibility && activeSession.isAuthenticated && (
+                    <button
+                        onClick={startTourManually}
+                        className="p-1.5 sm:p-2 rounded-full text-sky-600 hover:bg-sky-100 dark:text-sky-400 dark:hover:bg-sky-700 transition-colors"
+                        title="نمایش راهنمای تعاملی"
+                    >
+                        <HelpCircle className="h-5 sm:h-6 w-5 sm:w-6" />
+                    </button>
+                )}
+                 {activeSession.isAuthenticated && (
+                    <button
+                        onClick={logout}
+                        className="flex items-center px-2 sm:px-3 py-1 sm:py-1.5 rounded-md text-xs sm:text-sm text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-700 transition-colors"
+                        title="خروج از حساب کاربری"
+                    >
+                        <LogOut className="me-1 sm:me-2 h-4 sm:h-5 w-4 sm:w-5" /> خروج
+                    </button>
+                )}
+            </div>
           </div>
         </div>
       </div>
       
       <div className="w-full max-w-5xl mx-auto px-4 py-4 flex-grow">
-        {criticalDeadlines.length > 0 && (
-          <div className="w-full max-w-3xl mx-auto p-4 my-4 bg-red-100 border-r-4 border-red-600 text-red-700 rounded-md shadow-lg animate-blink">
-            <div className="flex items-center">
-              <AlertTriangle className="h-8 w-8 me-3 text-red-600 flex-shrink-0" />
-              <div>
-                <p className="font-bold text-lg">هشدار فوری! مهلت‌های بسیار نزدیک (امروز):</p>
-                <ul className="list-disc ps-5 mt-1">
-                  {criticalDeadlines.map(f => (
-                    <li key={f.id} className="text-md font-medium">
-                      مهلت ارسال آثار برای "{f.festivalName}" امروز به پایان می‌رسد!
-                    </li>
-                  ))}
-                </ul>
+        <div id="tour-notifications-area">
+          {criticalDeadlines.length > 0 && (
+            <div className="w-full max-w-3xl mx-auto p-4 my-4 bg-red-100 border-r-4 border-red-600 text-red-700 rounded-md shadow-lg animate-blink">
+              <div className="flex items-center">
+                <AlertTriangle className="h-8 w-8 me-3 text-red-600 flex-shrink-0" />
+                <div>
+                  <p className="font-bold text-lg">هشدار فوری! مهلت‌های بسیار نزدیک (امروز):</p>
+                  <ul className="list-disc ps-5 mt-1">
+                    {criticalDeadlines.map(f => (
+                      <li key={f.id} className="text-md font-medium">
+                        مهلت ارسال آثار برای "{f.festivalName}" امروز به پایان می‌رسد!
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {storageError && (
+          {upcomingNonCriticalDeadlines.length > 0 && (
+            <div className="w-full max-w-3xl mx-auto p-4 mb-6 bg-yellow-100 border-r-4 border-yellow-500 text-yellow-700 rounded-md shadow">
+              <div className="flex items-center">
+                <AlertTriangle className="h-6 w-6 me-3 text-yellow-500" />
+                <div>
+                  <p className="font-bold">مهلت‌های نزدیک (ظرف ۲ روز آینده، غیر از موارد فوری):</p>
+                  <ul className="list-disc ps-5">
+                  {upcomingNonCriticalDeadlines.map(f => <li key={f.id}>مهلت "{f.festivalName}" به زودی فرا می‌رسد.</li>)}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div> 
+
+
+        {festivalsDbError && (
           <div className="w-full max-w-3xl mx-auto p-4 mb-6 bg-orange-100 border-r-4 border-orange-500 text-orange-800 rounded-md shadow">
             <div className="flex items-start">
               <AlertTriangle className="h-6 w-6 me-3 text-orange-500 flex-shrink-0" />
               <div className="flex-grow">
-                <p className="font-bold">هشدار ذخیره‌سازی!</p>
+                <p className="font-bold">هشدار پایگاه داده!</p>
                 <p className="text-sm">
-                  {storageError.name === 'QuotaExceededError'
+                  {festivalsDbError.name === 'QuotaExceededError' // This specific name check might be less relevant for IndexedDB
                     ? 'فضای ذخیره‌سازی محلی مرورگر پر است. ممکن است تغییرات جدید یا فایل‌های بزرگ ذخیره نشوند. برای رفع مشکل، سعی کنید تعدادی از فراخوان‌های قدیمی‌تر یا فایل‌های حجیم را حذف کنید، یا فضای ذخیره‌سازی مرورگر خود را برای این سایت مدیریت نمایید.'
-                    : `خطایی در ذخیره‌سازی رخ داده است: ${storageError.message}. ممکن است برخی اطلاعات ذخیره نشوند.`}
+                    : `خطایی در پایگاه داده داخلی برنامه رخ داده است: ${festivalsDbError.message}. ممکن است برخی اطلاعات به درستی بارگذاری یا ذخیره نشوند.`}
                 </p>
-                <p className="text-xs mt-1 text-orange-700">در صورت ادامه مشکل، اطلاعات کنسول مرورگر (F12) می‌تواند مفید باشد.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {upcomingNonCriticalDeadlines.length > 0 && (
-          <div className="w-full max-w-3xl mx-auto p-4 mb-6 bg-yellow-100 border-r-4 border-yellow-500 text-yellow-700 rounded-md shadow">
-            <div className="flex items-center">
-              <AlertTriangle className="h-6 w-6 me-3 text-yellow-500" />
-              <div>
-                <p className="font-bold">مهلت‌های نزدیک (ظرف ۲ روز آینده، غیر از موارد فوری):</p>
-                <ul className="list-disc ps-5">
-                {upcomingNonCriticalDeadlines.map(f => <li key={f.id}>مهلت "{f.festivalName}" به زودی فرا می‌رسد.</li>)}
-                </ul>
+                <p className="text-xs mt-1 text-orange-700">در صورت ادامه مشکل، اطلاعات کنسول مرورگر (F12) می‌تواند مفید باشد یا با پشتیبانی تماس بگیرید.</p>
               </div>
             </div>
           </div>
@@ -356,6 +422,14 @@ const AppContentWrapper: React.FC = () => {
           {currentView === View.Calendar && <CalendarView />}
         </main>
       </div>
+
+      <InteractiveTour
+        isOpen={isTourActive}
+        currentStepIndex={currentTourStep}
+        setCurrentStepIndex={setCurrentTourStep}
+        onComplete={handleCompleteTour}
+        currentAppView={currentView}
+      />
       
       <footer className="w-full max-w-5xl mx-auto px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700">
         <p>

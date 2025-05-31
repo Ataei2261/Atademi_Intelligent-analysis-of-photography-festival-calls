@@ -1,96 +1,176 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useMemo } from 'react';
 import { FestivalInfo } from '../types';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import {
+  initDB,
+  getAllFestivals as getAllFestivalsDB,
+  addFestival as addFestivalDB,
+  updateFestival as updateFestivalDB,
+  deleteFestival as deleteFestivalDB,
+  clearFestivals as clearFestivalsDB,
+  bulkAddFestivals as bulkAddFestivalsDB,
+  isMigrationDone,
+  markMigrationAsDone
+} from '../services/indexedDbService';
+
+const OLD_LOCALSTORAGE_FESTIVALS_KEY = 'festivals';
 
 interface FestivalsContextType {
   festivals: FestivalInfo[];
-  addFestival: (festival: FestivalInfo) => void;
-  updateFestival: (updatedFestival: FestivalInfo) => void;
-  deleteFestival: (id: string) => void;
-  replaceAllFestivals: (newFestivals: FestivalInfo[]) => void; // New function
+  addFestival: (festival: FestivalInfo) => Promise<void>;
+  updateFestival: (updatedFestival: FestivalInfo) => Promise<void>;
+  deleteFestival: (id: string) => Promise<void>;
+  replaceAllFestivals: (newFestivals: FestivalInfo[]) => Promise<void>;
   getFestivalById: (id: string) => FestivalInfo | undefined;
-  isLoading: boolean; // Global loading state for context-managed operations
-  setIsLoading: (loading: boolean) => void;
-  storageError: Error | null; // To propagate storage errors
+  isLoading: boolean;
+  dbError: Error | null; // Renamed from storageError for clarity
 }
 
 const FestivalsContext = createContext<FestivalsContextType | undefined>(undefined);
 
 export const FestivalsProvider: React.FC<{ children: ReactNode, onFestivalsChange?: (festivals: FestivalInfo[]) => void }> = ({ children, onFestivalsChange }) => {
-  const [festivals, setFestivals, storageError] = useLocalStorage<FestivalInfo[]>('festivals', []);
-  const [isLoading, setIsLoading] = useState(false);
+  const [festivals, setFestivals] = useState<FestivalInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
+  const [dbError, setDbError] = useState<Error | null>(null);
+
+  const performMigration = useCallback(async () => {
+    if (typeof window !== 'undefined' && !isMigrationDone()) {
+      console.log('[Migration] Checking for data in localStorage...');
+      try {
+        const lsDataString = localStorage.getItem(OLD_LOCALSTORAGE_FESTIVALS_KEY);
+        if (lsDataString) {
+          const lsFestivals: FestivalInfo[] = JSON.parse(lsDataString);
+          if (Array.isArray(lsFestivals) && lsFestivals.length > 0) {
+            console.log(`[Migration] Found ${lsFestivals.length} festivals in localStorage. Migrating to IndexedDB...`);
+            await bulkAddFestivalsDB(lsFestivals); // Add to IDB
+            localStorage.removeItem(OLD_LOCALSTORAGE_FESTIVALS_KEY); // Remove from LS
+            markMigrationAsDone(); // Mark migration as done
+            console.log('[Migration] Successfully migrated data from localStorage to IndexedDB and removed old LS data.');
+            return lsFestivals; // Return migrated festivals to immediately populate state
+          } else {
+            console.log('[Migration] No valid festival data in localStorage to migrate.');
+            markMigrationAsDone(); // Mark as done even if no data, to avoid re-checking
+          }
+        } else {
+          console.log('[Migration] No festival data found in localStorage.');
+          markMigrationAsDone(); // Mark as done to avoid re-checking
+        }
+      } catch (error) {
+        console.error('[Migration] Error during migration from localStorage to IndexedDB:', error);
+        // Don't throw, allow app to continue with (potentially empty) IDB
+        // User might need to re-import data if migration failed badly.
+      }
+    }
+    return null; // No data migrated or migration already done
+  }, []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      setDbError(null);
+      try {
+        await initDB();
+        
+        let migratedFestivals: FestivalInfo[] | null = null;
+        if (!isMigrationDone()) {
+          migratedFestivals = await performMigration();
+        }
+
+        if (migratedFestivals) {
+          setFestivals(migratedFestivals);
+        } else {
+          const dbFestivals = await getAllFestivalsDB();
+          setFestivals(dbFestivals);
+        }
+        // console.log('[FestivalsContext] Data loaded from IndexedDB.');
+      } catch (error: any) {
+        console.error('[FestivalsContext] Error loading data from IndexedDB:', error);
+        setDbError(error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [performMigration]);
 
   useEffect(() => {
     if (onFestivalsChange) {
       onFestivalsChange(festivals);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [festivals, onFestivalsChange]);
 
+  const addFestival = useCallback(async (festival: FestivalInfo) => {
+    setIsLoading(true);
+    setDbError(null);
+    try {
+      await addFestivalDB(festival);
+      setFestivals(prev => [...prev, festival]);
+    } catch (error: any) {
+      console.error('[FestivalsContext] Error adding festival to DB:', error);
+      setDbError(error);
+      throw error; // Re-throw for component-level handling if needed
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const addFestival = useCallback((festival: FestivalInfo) => {
-    setFestivals(prev => [...prev, festival]);
-  }, [setFestivals]);
+  const updateFestival = useCallback(async (updatedFestival: FestivalInfo) => {
+    setIsLoading(true);
+    setDbError(null);
+    try {
+      await updateFestivalDB(updatedFestival);
+      setFestivals(prev => prev.map(f => f.id === updatedFestival.id ? updatedFestival : f));
+    } catch (error: any) {
+      console.error('[FestivalsContext] Error updating festival in DB:', error);
+      setDbError(error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const updateFestival = useCallback((updatedFestival: FestivalInfo) => {
-    setFestivals(prev => prev.map(f => f.id === updatedFestival.id ? updatedFestival : f));
-  }, [setFestivals]);
+  const deleteFestival = useCallback(async (idToDelete: string) => {
+    setIsLoading(true);
+    setDbError(null);
+    try {
+      await deleteFestivalDB(idToDelete);
+      setFestivals(prev => prev.filter(f => f.id !== idToDelete));
+    } catch (error: any) {
+      console.error('[FestivalsContext] Error deleting festival from DB:', error);
+      setDbError(error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const deleteFestival = useCallback((idToDelete: string) => {
-    console.log(`%c[CONTEXT deleteFestival] CALLED. Attempting to delete ID: "${idToDelete}" (Type: ${typeof idToDelete})`, "color: red; font-weight: bold; font-size: 1.1em;");
-
-    setFestivals(prevFestivals => {
-      console.log(`%c[CONTEXT deleteFestival > setFestivals] PREV Festivals (count: ${prevFestivals?.length}):`, "color: orange; font-weight: bold;", prevFestivals?.map(f => ({id: f.id, name: f.festivalName, typeOfId: typeof f.id })));
-
-      if (!Array.isArray(prevFestivals)) {
-        console.error("%c[CONTEXT deleteFestival > setFestivals] CRITICAL: prevFestivals is NOT an array!", "color: red; font-size: 1.3em; font-weight: bold;");
-        return []; 
+  const replaceAllFestivals = useCallback(async (newFestivals: FestivalInfo[]) => {
+    setIsLoading(true);
+    setDbError(null);
+    try {
+      await clearFestivalsDB();
+      if (newFestivals.length > 0) {
+        await bulkAddFestivalsDB(newFestivals);
       }
-      if (prevFestivals.length === 0) {
-        console.warn("%c[CONTEXT deleteFestival > setFestivals] PREV Festivals array is EMPTY. No deletion possible.", "color: orange; font-weight: bold;");
-        return [];
+      setFestivals(newFestivals);
+    } catch (error: any) {
+      console.error('[FestivalsContext] Error replacing all festivals in DB:', error);
+      setDbError(error);
+      // Attempt to reload from DB to ensure consistency if bulk add failed partially
+      try {
+          const currentDbFestivals = await getAllFestivalsDB();
+          setFestivals(currentDbFestivals);
+      } catch (reloadError) {
+          console.error('[FestivalsContext] Error reloading festivals after replaceAll failure:', reloadError);
+          // If reloading also fails, we might be in a bad state.
+          // Setting festivals to an empty array or the newFestivals might be options
+          // depending on desired recovery behavior. For now, dbError reflects the primary error.
       }
-
-      let found = false;
-      const newFestivals = prevFestivals.filter(f => {
-        if (f.id === undefined || f.id === null) {
-            console.warn(`%c[CONTEXT deleteFestival > filter] Festival found with undefined/null ID (This item will be kept unless its ID matches 'idToDelete' by chance):`, "color: #ff8c00; font-weight:bold", f);
-        }
-        // Explicitly check type of f.id
-        if (typeof f.id !== 'string') {
-             console.warn(`%c[CONTEXT deleteFestival > filter] Festival found with non-string ID (Type: ${typeof f.id}, Value: ${f.id}). This item will be kept unless its ID matches 'idToDelete'. Festival:`, "color: #ff8c00; font-weight:bold", f);
-        }
-
-        const match = String(f.id) === idToDelete; // Coerce f.id to string for comparison, though it should be string
-        if (match) {
-          found = true;
-          console.log(`%c[CONTEXT deleteFestival > filter] MATCH FOUND for ID "${idToDelete}". Festival being removed:`, "color: green; font-weight:bold", f);
-        }
-        return !match; // Keep if NOT a match
-      });
-
-      if (found) {
-        console.log(`%c[CONTEXT deleteFestival > setFestivals] SUCCESS: ID "${idToDelete}" was found and removed. New list count: ${newFestivals.length}. Previous count: ${prevFestivals.length}`, "color: green; font-weight: bold; font-size: 1.2em;");
-        console.log(`%c[CONTEXT deleteFestival > setFestivals] NEW Festivals list:`, "color: green; font-weight:bold", newFestivals?.map(f => ({id: f.id, name: f.festivalName })));
-      } else {
-        console.warn(`%c[CONTEXT deleteFestival > setFestivals] FAILURE: ID "${idToDelete}" NOT FOUND in the list. No changes made to the festivals list.`, "color: red; font-weight: bold; font-size: 1.2em;");
-        // For deeper debugging if IDs *look* the same but aren't matching:
-        console.log("%c[CONTEXT deleteFestival > setFestivals] Detailed check for non-matching ID:", "color: orange; font-weight:bold");
-        prevFestivals.forEach((f, index) => {
-            console.log(`Item ${index}: ID from list = "${f.id}" (Type: ${typeof f.id}), Target ID = "${idToDelete}" (Type: ${typeof idToDelete}), Strict Equal (===): ${f.id === idToDelete}, Coerced Equal (==): ${f.id == idToDelete}, String(f.id) === idToDelete: ${String(f.id) === idToDelete}`);
-            if (String(f.id).trim() !== f.id || idToDelete.trim() !== idToDelete) {
-                console.warn(`  Potential whitespace issue: List ID trimmed = "${String(f.id).trim()}", Target ID trimmed = "${idToDelete.trim()}"`);
-            }
-        });
-      }
-      return newFestivals;
-    });
-  }, [setFestivals]);
-
-  const replaceAllFestivals = useCallback((newFestivals: FestivalInfo[]) => {
-    setFestivals(newFestivals);
-  }, [setFestivals]);
+      throw error; // Re-throw for component-level handling if needed
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const getFestivalById = useCallback((id: string): FestivalInfo | undefined => {
     return festivals.find(f => f.id === id);
@@ -101,12 +181,11 @@ export const FestivalsProvider: React.FC<{ children: ReactNode, onFestivalsChang
     addFestival,
     updateFestival,
     deleteFestival,
-    replaceAllFestivals, // Add to context
+    replaceAllFestivals,
     getFestivalById,
     isLoading,
-    setIsLoading,
-    storageError
-  }), [festivals, addFestival, updateFestival, deleteFestival, replaceAllFestivals, getFestivalById, isLoading, setIsLoading, storageError]);
+    dbError
+  }), [festivals, addFestival, updateFestival, deleteFestival, replaceAllFestivals, getFestivalById, isLoading, dbError]);
 
   return (
     <FestivalsContext.Provider value={contextValue}>

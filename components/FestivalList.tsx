@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalCard } from './FestivalCard';
 import { FestivalModal } from './FestivalModal';
-import { FestivalInfo, AppBackup } from '../types'; // Removed AuthContextBackup, PasswordActivations, ActiveSession
+import { FestivalInfo, AppBackup } from '../types';
 import { Search, Calendar as CalendarIcon, Download as DownloadIconLucide, Save, FolderOpen, AlertTriangle, CheckCircle, Upload } from 'lucide-react'; // Added Upload
 import { PERSIAN_MONTH_NAMES_WITH_ALL } from '../constants';
 import { parseJalaliDate, toJalaali, formatJalaliDate, jalaaliToday, formatGregorianDate, toGregorian } from '../utils/dateConverter';
@@ -298,19 +298,16 @@ export const FestivalList: React.FC = () => {
     }
   };
 
-  // Removed getAuthDataFromLocalStorage function
 
   const handleSaveDataToSystem = async () => {
     setFileOperationLoading(true);
     setFileOpMessage(null);
     
-    // Removed authContextData
     const dataToSave: AppBackup = {
       festivals,
-      // authContextData: undefined // No longer part of AppBackup type
     };
 
-    const result = await saveFestivalsToFileSystem(dataToSave, festivals.length > 0); // Pass the combined data
+    const result = await saveFestivalsToFileSystem(dataToSave, festivals.length > 0);
     if (result.success) {
       setFileOpMessage({ type: 'success', text: result.message });
     } else {
@@ -322,23 +319,21 @@ export const FestivalList: React.FC = () => {
 
   const handleLoadDataFromSystem = async () => {
     const confirmation = window.confirm(
-      "بارگذاری اطلاعات از فایل، تمام اطلاعات فراخوان‌های فعلی شما را پاک کرده و با اطلاعات فایل جایگزین می‌کند. آیا مطمئن هستید؟" // Updated message
+      "بارگذاری اطلاعات از فایل، تمام اطلاعات فراخوان‌های فعلی شما را پاک کرده و با اطلاعات فایل جایگزین می‌کند. آیا مطمئن هستید؟"
     );
     if (!confirmation) return;
 
     setFileOperationLoading(true);
     setFileOpMessage(null);
-    const result = await loadFestivalsFromFileSystem(); // This function now returns AppBackup structure
+    const result = await loadFestivalsFromFileSystem(); 
     
     if (result.success && result.data) {
-      const appData = result.data as AppBackup; // Cast to AppBackup
-      replaceAllFestivals(appData.festivals || []); // Handle cases where festivals might be missing
+      const appData = result.data as AppBackup; 
+      replaceAllFestivals(appData.festivals || []); 
       
       let message = `اطلاعات فراخوان‌ها با موفقیت از فایل "${result.fileName || 'انتخابی'}" بارگذاری شد.`;
-
-      // Removed logic for authContextData
       setFileOpMessage({ type: 'success', text: message });
-      setTimeout(() => setFileOpMessage(null), 5000); // Removed reload
+      setTimeout(() => setFileOpMessage(null), 5000);
     } else {
       setFileOpMessage({ type: 'error', text: result.message });
        setTimeout(() => setFileOpMessage(null), 5000);
@@ -347,9 +342,8 @@ export const FestivalList: React.FC = () => {
   };
   
   const handleDownloadBackupJson = () => {
-    // Removed authContextData check
     if (festivals.length === 0) {
-      setFileOpMessage({ type: 'error', text: 'هیچ اطلاعات فراخوانی برای دانلود وجود ندارد.' }); // Updated message
+      setFileOpMessage({ type: 'error', text: 'هیچ اطلاعات فراخوانی برای دانلود وجود ندارد.' });
       setTimeout(() => setFileOpMessage(null), 3000);
       return;
     }
@@ -359,7 +353,6 @@ export const FestivalList: React.FC = () => {
     try {
       const dataToSave: AppBackup = {
         festivals,
-        // authContextData: undefined // No longer part of AppBackup type
       };
       const jsonString = JSON.stringify(dataToSave, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
@@ -367,12 +360,12 @@ export const FestivalList: React.FC = () => {
       const link = document.createElement('a');
       link.href = href;
       const today = jalaaliToday();
-      link.download = `festivals_backup_${today.jy}-${String(today.jm).padStart(2, '0')}-${String(today.jd).padStart(2, '0')}.json`; // Updated filename
+      link.download = `festivals_backup_${today.jy}-${String(today.jm).padStart(2, '0')}-${String(today.jd).padStart(2, '0')}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(href);
-      setFileOpMessage({ type: 'success', text: 'فایل پشتیبان اطلاعات فراخوان‌ها با موفقیت آماده دانلود شد.' }); // Updated message
+      setFileOpMessage({ type: 'success', text: 'فایل پشتیبان اطلاعات فراخوان‌ها با موفقیت آماده دانلود شد.' });
     } catch (error: any) {
       console.error('Error creating JSON backup:', error);
       setFileOpMessage({ type: 'error', text: `خطا در ایجاد فایل پشتیبان JSON: ${error.message}` });
@@ -387,7 +380,7 @@ export const FestivalList: React.FC = () => {
     if (!file) return;
 
     const confirmation = window.confirm(
-      "بارگذاری اطلاعات از فایل، تمام اطلاعات فراخوان‌های فعلی شما را پاک کرده و با اطلاعات فایل جایگزین می‌کند. آیا مطمئن هستید؟" // Updated message
+      "بارگذاری اطلاعات از فایل، تمام اطلاعات فراخوان‌های فعلی شما را پاک کرده و با اطلاعات فایل جایگزین می‌کند. آیا مطمئن هستید؟"
     );
     if (!confirmation) {
       if (mobileUploadInputRef.current) mobileUploadInputRef.current.value = '';
@@ -397,17 +390,15 @@ export const FestivalList: React.FC = () => {
     setFileOperationLoading(true);
     setFileOpMessage(null);
     
-    const result = await readJsonFromFile(file); // This function now returns AppBackup
+    const result = await readJsonFromFile(file); 
 
     if (result.success && result.data) {
       const appData = result.data as AppBackup;
       replaceAllFestivals(appData.festivals || []);
       
       let message = `اطلاعات فراخوان‌ها با موفقیت از فایل "${file.name}" بارگذاری شد.`;
-
-      // Removed logic for authContextData
       setFileOpMessage({ type: 'success', text: message });
-      setTimeout(() => setFileOpMessage(null), 5000); // Removed reload
+      setTimeout(() => setFileOpMessage(null), 5000);
     } else {
       setFileOpMessage({ type: 'error', text: result.message });
       setTimeout(() => setFileOpMessage(null), 5000);
@@ -479,7 +470,7 @@ export const FestivalList: React.FC = () => {
     return <div className="text-center py-10 text-gray-500">در حال بارگذاری لیست فراخوان‌ها...</div>;
   }
 
-  const noDataToSave = festivals.length === 0; // Simplified condition
+  const noDataToSave = festivals.length === 0; 
 
   if (festivals.length === 0 && !contextIsLoading) { 
     return (
