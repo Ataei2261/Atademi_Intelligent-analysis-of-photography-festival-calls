@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, DragEvent } from 'react';
 import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalInfo, ExtractedData, FestivalSourceFile } from '../types';
 import { extractTextFromPdf, fileToBase64 } from '../services/fileProcessingService';
@@ -20,6 +20,7 @@ interface ProcessingWarning {
 export const FileUploadArea: React.FC = () => {
   const { addFestival, isLoading: contextIsLoading } = useFestivals();
   const [isSelfProcessing, setIsSelfProcessing] = useState<boolean>(false);
+  const [isAttemptingCancel, setIsAttemptingCancel] = useState<boolean>(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<string[]>([]); 
   const [pdfPreview, setPdfPreview] = useState<boolean>(false); 
@@ -30,6 +31,7 @@ export const FileUploadArea: React.FC = () => {
   
   const [showModal, setShowModal] = useState(false);
   const [initialModalData, setInitialModalData] = useState<Partial<FestivalInfo> | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const currentOperationAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -42,6 +44,8 @@ export const FileUploadArea: React.FC = () => {
     setError(null);
     setProcessingMessage(null);
     setProcessingWarning(null);
+    setIsAttemptingCancel(false); 
+    setIsDragging(false);
     if (currentOperationAbortControllerRef.current) {
         currentOperationAbortControllerRef.current.abort();
         currentOperationAbortControllerRef.current = null;
@@ -51,26 +55,23 @@ export const FileUploadArea: React.FC = () => {
   };
   
   const handleCancelProcessing = () => {
-    if (currentOperationAbortControllerRef.current) {
+    if (currentOperationAbortControllerRef.current && !isAttemptingCancel) {
+      setIsAttemptingCancel(true);
+      setProcessingMessage("درخواست لغو ارسال شد. منتظر پاسخ سرویس..."); 
       currentOperationAbortControllerRef.current.abort();
-      setProcessingMessage("عملیات در حال لغو شدن...");
     }
   };
 
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const processAndSetFiles = async (files: FileList | null, sourceElement?: HTMLInputElement) => {
     setError(null);
     setProcessingMessage(null);
     setProcessingWarning(null);
+    setIsAttemptingCancel(false);
     setTextInput(''); 
     if (currentOperationAbortControllerRef.current) {
         currentOperationAbortControllerRef.current.abort();
         currentOperationAbortControllerRef.current = null;
     }
-
-
-    const files = event.target.files;
-    const currentFileInput = event.target;
 
     if (files && files.length > 0) {
       setSelectedFiles([]);
@@ -87,7 +88,7 @@ export const FileUploadArea: React.FC = () => {
       if (isPdfSelected && newFilesArray.length > 1) {
         setError('فقط یک فایل PDF قابل انتخاب است. برای بارگذاری چندین فایل، همه باید تصویر باشند.');
         setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-        if (currentFileInput) currentFileInput.value = ''; 
+        if (sourceElement) sourceElement.value = ''; 
         return;
       }
       if (isPdfSelected && newFilesArray.length === 1) {
@@ -104,7 +105,7 @@ export const FileUploadArea: React.FC = () => {
           } catch (err) {
             setError(`خطا در خواندن فایل ${file.name}`);
             setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-            if (currentFileInput) currentFileInput.value = ''; 
+            if (sourceElement) sourceElement.value = ''; 
             return;
           }
         }
@@ -113,7 +114,7 @@ export const FileUploadArea: React.FC = () => {
       } else if (newFilesArray.length > 0) { 
         setError('ترکیب فایل نامعتبر است. لطفاً یا یک فایل PDF، یا یک یا چند فایل تصویر (JPG/PNG) انتخاب کنید.');
         setSelectedFiles([]); setFilePreviews([]); setPdfPreview(false);
-        if (currentFileInput) currentFileInput.value = ''; 
+        if (sourceElement) sourceElement.value = ''; 
         return;
       }
     } else {
@@ -122,6 +123,46 @@ export const FileUploadArea: React.FC = () => {
       setPdfPreview(false);
     }
   };
+
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    processAndSetFiles(event.target.files, event.target);
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // Check if the leave target is outside the dropzone bounds
+    const dropzone = event.currentTarget;
+    if (!dropzone.contains(event.relatedTarget as Node)) {
+        setIsDragging(false);
+    }
+  };
+  
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // This is necessary to allow dropping
+    if (!isDragging) setIsDragging(true); // Ensure dragging state is true
+  };
+  
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+    const files = event.dataTransfer.files;
+    processAndSetFiles(files);
+    // Clear the file input value if files were dropped, as the input itself didn't change
+    const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  };
+
   
   const handleTextInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setSelectedFiles([]);
@@ -130,6 +171,7 @@ export const FileUploadArea: React.FC = () => {
     setError(null); 
     setProcessingMessage(null);
     setProcessingWarning(null);
+    setIsAttemptingCancel(false);
     if (currentOperationAbortControllerRef.current) {
         currentOperationAbortControllerRef.current.abort();
         currentOperationAbortControllerRef.current = null;
@@ -144,7 +186,9 @@ export const FileUploadArea: React.FC = () => {
     setIsSelfProcessing(true);
     setError(null);
     setProcessingWarning(null);
-    setProcessingMessage('در حال تحلیل متن و استخراج اطلاعات با Gemini...');
+    if (!isAttemptingCancel) {
+        setProcessingMessage('در حال تحلیل متن و استخراج اطلاعات با Gemini...');
+    }
 
     try {
       const festivalInfoFileName = source === 'file' 
@@ -208,14 +252,15 @@ export const FileUploadArea: React.FC = () => {
             (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
             (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
           displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
-        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { // Handle the specific error from prompt
-             displayError = `خطا در پردازش اطلاعات: ${err.message}`; // Keep the specific abort message for retry logic
+        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { 
+             displayError = `خطا در پردازش اطلاعات: ${err.message}`; 
         }
         setError(displayError);
         setProcessingMessage(null);
       }
     } finally {
       setIsSelfProcessing(false);
+      setIsAttemptingCancel(false); 
       currentOperationAbortControllerRef.current = null;
     }
   };
@@ -234,18 +279,20 @@ export const FileUploadArea: React.FC = () => {
     setIsSelfProcessing(true);
     setError(null);
     setProcessingWarning(null);
-    setProcessingMessage('در حال آماده‌سازی فایل(ها)...');
+     if (!isAttemptingCancel) {
+        setProcessingMessage('در حال آماده‌سازی فایل(ها)...');
+    }
 
     try {
       let extractedText: string | undefined;
       
       if (pdfPreview && selectedFiles.length === 1) {
         const pdfFile = selectedFiles[0];
-        setProcessingMessage('در حال استخراج متن از PDF...');
+         if (!isAttemptingCancel) setProcessingMessage('در حال استخراج متن از PDF...');
         extractedText = await extractTextFromPdf(pdfFile); 
         if (controller.signal.aborted) throw new DOMException('Operation aborted during PDF processing', 'AbortError');
       } else if (filePreviews.length > 0 && selectedFiles.length > 0) {
-        setProcessingMessage(`در حال استخراج متن از ${selectedFiles.length} تصویر با Gemini...`);
+         if (!isAttemptingCancel) setProcessingMessage(`در حال استخراج متن از ${selectedFiles.length} تصویر با Gemini...`);
         const allTexts: string[] = [];
         for (let i = 0; i < selectedFiles.length; i++) {
           if (controller.signal.aborted) throw new DOMException('Operation aborted during image loop', 'AbortError');
@@ -263,9 +310,10 @@ export const FileUploadArea: React.FC = () => {
             message: 'متن بسیار کمی از تصویر(های) انتخاب شده استخراج شد. این تصویر(ها) ممکن است برای تحلیل فراخوان مناسب نباشد.',
             dataToProcess: extractedText || ""
           });
-          setIsSelfProcessing(false);
+          setIsSelfProcessing(false); 
           setProcessingMessage(null);
-          currentOperationAbortControllerRef.current = null;
+          currentOperationAbortControllerRef.current = null; 
+          setIsAttemptingCancel(false); 
           return;
         }
       } else {
@@ -300,16 +348,18 @@ export const FileUploadArea: React.FC = () => {
             (err.message.toLowerCase().includes('api_key') || err.message.toLowerCase().includes('api key')) && 
             (err.message.toLowerCase().includes('environment variables') || err.message.toLowerCase().includes('missing') || err.message.toLowerCase().includes('not initialized'))) {
           displayError = "خطا در ارتباط با سرویس هوش مصنوعی: کلید API مورد نیاز به درستی در محیط برنامه تنظیم نشده است. اگر از Vercel یا پلتفرم مشابهی استفاده می‌کنید، لطفاً مطمئن شوید متغیر محیطی API_KEY در تنظیمات پروژه شما برای محیط صحیح (Production/Preview) تعریف شده است. برای اطلاعات بیشتر، کنسول مرورگر (F12) و لاگ‌های سمت سرور را بررسی کنید.";
-        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { // Handle the specific error from prompt
-            displayError = `خطا در پردازش فایل(ها): ${err.message}`; // Keep the specific abort message for retry logic
+        } else if (err.message && typeof err.message === 'string' && err.message.includes("Operation aborted")) { 
+            displayError = `خطا در پردازش فایل(ها): ${err.message}`; 
         }
         setError(displayError);
         setProcessingMessage(null);
       }
-      setIsSelfProcessing(false);
-      currentOperationAbortControllerRef.current = null;
+    } finally {
+        setIsSelfProcessing(false);
+        setIsAttemptingCancel(false);
+        currentOperationAbortControllerRef.current = null;
     }
-  }, [selectedFiles, filePreviews, pdfPreview, setIsSelfProcessing]);
+  }, [selectedFiles, filePreviews, pdfPreview, isAttemptingCancel]); 
 
   const processTextInput = useCallback(async () => {
     const trimmedText = textInput.trim();
@@ -331,19 +381,21 @@ export const FileUploadArea: React.FC = () => {
         message: 'متن وارد شده بسیار کوتاه است. ممکن است برای تحلیل دقیق اطلاعات کافی نباشد.',
         dataToProcess: textInput 
       });
-      setIsSelfProcessing(false);
-      currentOperationAbortControllerRef.current = null;
+      setIsSelfProcessing(false); 
+      currentOperationAbortControllerRef.current = null; 
+      setIsAttemptingCancel(false); 
       return;
     }
     
     await _actuallyProcessData(textInput, 'text', controller.signal);
 
-  }, [textInput, setIsSelfProcessing]);
+  }, [textInput, isAttemptingCancel]); 
 
   const handleProceedWithWarning = () => {
     if (processingWarning?.dataToProcess !== undefined) {
       const controller = new AbortController();
       currentOperationAbortControllerRef.current = controller;
+      setIsAttemptingCancel(false); 
       _actuallyProcessData(processingWarning.dataToProcess, processingWarning.type === 'shortImageText' ? 'file' : 'text', controller.signal, "متن ورودی کاربر (کوتاه).txt");
     }
     setProcessingWarning(null);
@@ -367,17 +419,21 @@ export const FileUploadArea: React.FC = () => {
   };
 
   const isErrorRetryable = error && 
-                           (error.includes("لغو شد") || // User-facing "Cancelled" message
-                            error.includes("Operation aborted") || // System-level AbortError messages like "Operation aborted by user post-API call"
-                            (error.includes("Gemini API") &&  // General Gemini errors (non-API key, non-init)
+                           (error.includes("لغو شد") || 
+                            error.includes("Operation aborted") || 
+                            (error.includes("Gemini API") &&  
                              !error.toLowerCase().includes("api_key") && 
                              !error.toLowerCase().includes("api key") && 
                              !error.toLowerCase().includes("environment") &&
                              !error.toLowerCase().includes("not initialized")) ||
-                            (error.toLowerCase().includes("failed to fetch") || error.toLowerCase().includes("networkerror")) // Network errors
+                            (error.toLowerCase().includes("failed to fetch") || error.toLowerCase().includes("networkerror")) 
                            );
 
   const currentLoadingState = isSelfProcessing || contextIsLoading;
+  
+  const dropZoneBaseClasses = "w-full h-40 border-2 border-dashed rounded-lg flex flex-col justify-center items-center transition-colors group-hover:border-teal-500 group-hover:bg-teal-50";
+  const dropZoneActiveClasses = isDragging ? 'border-green-500 bg-green-50' : (pdfPreview || filePreviews.length > 0 ? 'border-teal-400 bg-teal-50' : 'border-gray-300');
+
 
   return (
     <div className="w-full p-6 bg-white rounded-xl shadow-xl">
@@ -387,23 +443,34 @@ export const FileUploadArea: React.FC = () => {
         <>
           <div className="mb-6">
             <label htmlFor="file-upload" className="cursor-pointer group">
-              <div className={`w-full h-40 border-2 border-dashed rounded-lg flex flex-col justify-center items-center transition-colors group-hover:border-teal-500 group-hover:bg-teal-50 ${pdfPreview || filePreviews.length > 0 ? 'border-teal-400 bg-teal-50' : 'border-gray-300'}`}>
-                {isSelfProcessing && selectedFiles.length > 0 && processingMessage ? (
+              <div 
+                className={`${dropZoneBaseClasses} ${dropZoneActiveClasses}`}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {isSelfProcessing && selectedFiles.length > 0 && processingMessage && !isAttemptingCancel ? ( 
                    <div className="flex flex-col items-center text-teal-600">
                     <LoadingSpinner size="8" />
                   </div>
                 ) : pdfPreview ? (
-                    <FileText className="h-16 w-16 text-red-500 mb-2" />
+                    <FileText className="h-16 w-16 text-red-500 mb-2 pointer-events-none" />
                 ) : filePreviews.length > 0 ? (
-                    <div className="w-full h-full p-2 overflow-x-auto whitespace-nowrap flex items-center gap-2">
+                    <div className="w-full h-full p-2 overflow-x-auto whitespace-nowrap flex items-center gap-2 pointer-events-none">
                         {filePreviews.map((previewUrl, index) => (
                             <img key={index} src={previewUrl} alt={`پیش‌نمایش ${index + 1}`} className="h-28 w-auto object-contain rounded border border-gray-300 shadow-sm inline-block" />
                         ))}
                     </div>
+                ) : isDragging ? (
+                    <>
+                        <UploadCloud className="h-12 w-12 text-green-500 mb-2 pointer-events-none" />
+                        <p className="text-green-600 text-sm pointer-events-none">فایل(ها) را اینجا رها کنید</p>
+                    </>
                 ) : (
                   <>
-                    <UploadCloud className="h-12 w-12 text-gray-400 group-hover:text-teal-500 mb-2 transition-colors" />
-                    <p className="text-gray-500 group-hover:text-teal-600 text-sm">فایل PDF یا یک/چند تصویر (JPG/PNG) را بکشید و رها کنید یا کلیک کنید</p>
+                    <UploadCloud className="h-12 w-12 text-gray-400 group-hover:text-teal-500 mb-2 pointer-events-none" />
+                    <p className="text-gray-500 group-hover:text-teal-600 text-sm pointer-events-none">فایل PDF یا یک/چند تصویر (JPG/PNG) را بکشید و رها کنید یا کلیک کنید</p>
                   </>
                 )}
               </div>
@@ -445,7 +512,7 @@ export const FileUploadArea: React.FC = () => {
         </>
       )}
 
-      {error && !isSelfProcessing && (
+      {error && !isSelfProcessing && ( 
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md flex items-center text-sm">
           <AlertCircle className="h-5 w-5 me-2 flex-shrink-0" /> 
           <span className="flex-grow whitespace-pre-wrap">{error}</span>
@@ -473,7 +540,7 @@ export const FileUploadArea: React.FC = () => {
           )}
         </div>
       )}
-      {processingMessage && !error && !isSelfProcessing && !processingWarning && (
+      {processingMessage && !error && !isSelfProcessing && !processingWarning && ( 
          <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md flex items-center text-sm">
           <CheckCircle className="h-5 w-5 me-2" /> {processingMessage}
            <button onClick={() => setProcessingMessage(null)} className="ms-auto text-green-700 hover:text-green-900 p-1">
@@ -481,17 +548,28 @@ export const FileUploadArea: React.FC = () => {
           </button>
         </div>
       )}
-       {isSelfProcessing && processingMessage && !processingWarning && (
-        <div className="mb-4 p-3 bg-blue-100 text-blue-700 rounded-md flex items-center text-sm">
-          <LoadingSpinner size="5" className="me-2"/> 
+       {isSelfProcessing && processingMessage && !processingWarning && ( 
+        <div className={`mb-4 p-3 rounded-md flex items-center text-sm ${isAttemptingCancel ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+          <LoadingSpinner size="5" className={`me-2 ${isAttemptingCancel ? 'text-orange-600' : 'text-blue-600'}`} />
           <span className="flex-grow">{processingMessage}</span>
-           <button 
-              onClick={handleCancelProcessing} 
-              className="ms-2 px-2 py-0.5 bg-red-500 text-white text-xs rounded hover:bg-red-600 flex items-center"
-              title="لغو عملیات"
-            >
-              <XCircle size={14} className="me-1" /> لغو
-            </button>
+           {!isAttemptingCancel ? (
+              <button 
+                onClick={handleCancelProcessing} 
+                className="ms-2 px-2 py-0.5 bg-red-500 text-white text-xs rounded hover:bg-red-600 flex items-center"
+                title="لغو عملیات"
+              >
+                <XCircle size={14} className="me-1" /> لغو
+              </button>
+            ) : (
+              <button
+                disabled
+                className="ms-2 px-2 py-0.5 bg-gray-400 text-gray-700 text-xs rounded flex items-center cursor-not-allowed"
+                title="لغو در جریان است"
+              >
+                <LoadingSpinner size="4" color="text-gray-700" className="me-1 animate-none" /> 
+                لغو در جریان...
+              </button>
+            )}
         </div>
       )}
 
@@ -526,18 +604,18 @@ export const FileUploadArea: React.FC = () => {
           <button
             id="tour-process-file-button"
             onClick={processFile}
-            disabled={selectedFiles.length === 0 || currentLoadingState}
+            disabled={selectedFiles.length === 0 || currentLoadingState || isAttemptingCancel}
             className="flex-1 px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:bg-gray-400 disabled:text-gray-700 disabled:cursor-not-allowed flex items-center justify-center"
           >
-            {isSelfProcessing && selectedFiles.length > 0 ? <LoadingSpinner /> : <UploadCloud className="me-2 h-5 w-5" />}
+            {isSelfProcessing && selectedFiles.length > 0 && !isAttemptingCancel ? <LoadingSpinner /> : <UploadCloud className="me-2 h-5 w-5" />}
             پردازش فایل(ها)
           </button>
           <button
             onClick={processTextInput}
-            disabled={textInput.trim() === '' || currentLoadingState}
+            disabled={textInput.trim() === '' || currentLoadingState || isAttemptingCancel}
             className="flex-1 px-6 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-700 transition-colors disabled:bg-gray-400 disabled:text-gray-700 disabled:cursor-not-allowed flex items-center justify-center"
           >
-            {isSelfProcessing && textInput.trim() !== '' ? <LoadingSpinner /> : <Type className="me-2 h-5 w-5" />}
+            {isSelfProcessing && textInput.trim() !== '' && !isAttemptingCancel ? <LoadingSpinner /> : <Type className="me-2 h-5 w-5" />}
             پردازش متن وارد شده
           </button>
         </div>

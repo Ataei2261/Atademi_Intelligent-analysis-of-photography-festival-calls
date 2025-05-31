@@ -1,6 +1,6 @@
 
 
 git add .
-git commit -m "نهایی 94 خرداد"
+git commit -m "indexb"
 git push origin main
 

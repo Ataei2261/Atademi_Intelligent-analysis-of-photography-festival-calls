@@ -4,12 +4,14 @@ import { useFestivals } from '../contexts/FestivalsContext';
 import { FestivalCard } from './FestivalCard';
 import { FestivalModal } from './FestivalModal';
 import { FestivalInfo, AppBackup } from '../types';
-import { Search, Calendar as CalendarIcon, Download as DownloadIconLucide, Save, FolderOpen, AlertTriangle, CheckCircle, Upload } from 'lucide-react'; // Added Upload
+import { Search, Calendar as CalendarIcon, Download as DownloadIconLucide, Save, FolderOpen, AlertTriangle, CheckCircle, Upload, FileText as FileTextIcon } from 'lucide-react'; // Added Upload, FileTextIcon
 import { PERSIAN_MONTH_NAMES_WITH_ALL } from '../constants';
 import { parseJalaliDate, toJalaali, formatJalaliDate, jalaaliToday, formatGregorianDate, toGregorian } from '../utils/dateConverter';
 import JSZip from 'jszip';
 import { LoadingSpinner } from './LoadingSpinner';
 import { canUseFileSystemAccessApi, saveFestivalsToFileSystem, loadFestivalsFromFileSystem, readJsonFromFile, FileSystemAccessResult } from '../services/fileSystemAccessService';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ExternalHyperlink, PageOrientation, convertInchesToTwip, ImageRun } from 'docx';
+import saveAs from 'file-saver';
 
 
 export const FestivalList: React.FC = () => {
@@ -19,6 +21,7 @@ export const FestivalList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedShamsiMonth, setSelectedShamsiMonth] = useState<number>(0);
   const [isZippingSources, setIsZippingSources] = useState(false);
+  const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
 
   const [isFileApiAvailable, setIsFileApiAvailable] = useState(false);
   const [fileOperationLoading, setFileOperationLoading] = useState(false);
@@ -295,6 +298,198 @@ export const FestivalList: React.FC = () => {
       alert(`خطا در ایجاد فایل ZIP: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsZippingSources(false);
+    }
+  };
+
+  const handleExportDocxReport = async () => {
+    if (selectedShamsiMonth === 0 || filteredFestivals.length === 0) {
+      alert("لطفاً یک ماه خاص با جشنواره‌های موجود را برای تهیه گزارش Word انتخاب کنید.");
+      return;
+    }
+    if (isGeneratingDocx) return;
+
+    setIsGeneratingDocx(true);
+    setFileOpMessage(null);
+
+    try {
+      const today = jalaaliToday();
+      const reportTitleText = `گزارش فراخوان‌های ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]} ${today.jy}`;
+      const defaultFontSize = 11 * 2; // docx points are half-points
+      const headingFontSize = 14 * 2;
+      const fontName = "Vazirmatn";
+
+      const children: any[] = [
+        new Paragraph({
+          text: reportTitleText,
+          heading: HeadingLevel.TITLE,
+          alignment: AlignmentType.CENTER,
+          run: { font: fontName, size: 18 * 2, bold: true, rtl: true },
+        }),
+        new Paragraph({ text: "", spacing: { after: 200 } }), // Spacer
+      ];
+
+      for (const festival of filteredFestivals) {
+        children.push(
+          new Paragraph({
+            text: festival.festivalName || 'فراخوان بدون نام',
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.RIGHT,
+            run: { font: fontName, size: headingFontSize, bold: true, rtl: true, color: "065f46" }, // Teal color
+            spacing: { before: 300, after: 150 },
+            bidirectional: true,
+          })
+        );
+
+        const addDetail = (label: string, value?: string | number | string[] | null, isLink: boolean = false, isPreformatted: boolean = false) => {
+          if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return;
+          
+          const paragraphChildren: (TextRun | ExternalHyperlink)[] = [
+            new TextRun({ text: `${label}: `, bold: true, rtl: true, font: fontName, size: defaultFontSize }),
+          ];
+
+          if (Array.isArray(value)) {
+            paragraphChildren.push(new TextRun({ text: value.join('، '), rtl: true, font: fontName, size: defaultFontSize }));
+          } else if (isLink && typeof value === 'string' && (value.trim().startsWith('http') || value.trim().startsWith('mailto:'))) {
+             paragraphChildren.push(
+              new ExternalHyperlink({
+                children: [ // Changed from 'child' to 'children' and wrapped TextRun in an array
+                    new TextRun({
+                        text: value.trim(),
+                        style: "Hyperlink", 
+                        font: fontName, 
+                        size: defaultFontSize,
+                        rtl: false, 
+                    })
+                ],
+                link: value.trim(),
+              })
+            );
+          } else {
+            const textValue = String(value);
+            if (isPreformatted) {
+                 textValue.split('\n').forEach((line, index) => {
+                    if (index > 0) children.push(new Paragraph({ 
+                        children: [new TextRun({ text: line, rtl: true, font: fontName, size: defaultFontSize })],
+                        alignment: AlignmentType.RIGHT,
+                        indent: { firstLine: convertInchesToTwip(0.5) }, 
+                        bidirectional: true,
+                    }));
+                    else paragraphChildren.push(new TextRun({ text: line, rtl: true, font: fontName, size: defaultFontSize }));
+                 });
+            } else {
+                 paragraphChildren.push(new TextRun({ text: textValue, rtl: true, font: fontName, size: defaultFontSize }));
+            }
+          }
+          
+          children.push(new Paragraph({ 
+            children: paragraphChildren, 
+            alignment: AlignmentType.RIGHT, 
+            spacing: { after: 80 },
+            bidirectional: true,
+           }));
+        };
+        
+        addDetail("اهداف", festival.objectives, false, true);
+        addDetail("موضوعات", festival.topics);
+
+        let displayDeadline = "نامشخص";
+        if (festival.submissionDeadlinePersian) {
+          displayDeadline = formatJalaliDate(festival.submissionDeadlinePersian) + " شمسی";
+        } else if (festival.submissionDeadlineGregorian) {
+          try {
+            const [gy, gm, gd] = festival.submissionDeadlineGregorian.split('-').map(Number);
+            const jalaliConverted = toJalaali(gy, gm, gd);
+            displayDeadline = formatGregorianDate(festival.submissionDeadlineGregorian) + ` میلادی (تبدیل شده: ${formatJalaliDate(`${jalaliConverted.jy}/${jalaliConverted.jm}/${jalaliConverted.jd}`)} شمسی)`;
+          } catch { displayDeadline = formatGregorianDate(festival.submissionDeadlineGregorian) + " میلادی (خطا در تبدیل)"; }
+        }
+        addDetail("مهلت ارسال", displayDeadline);
+        
+        const deadlineStatusReport = getDaysRemainingForReport(festival);
+        addDetail("وضعیت", deadlineStatusReport.text);
+        addDetail("حداکثر عکس", festival.maxPhotos);
+        addDetail("مشخصات تصویر", festival.imageSize, false, true);
+        addDetail("روش ارسال", festival.submissionMethod, true, true);
+
+        if (festival.fileType?.startsWith('image/') && festival.filePreview && festival.filePreview.startsWith('data:image/') && festival.sourceFiles?.length === 1) {
+            try {
+                const base64Data = festival.filePreview.split(',')[1];
+                const imageBuffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                children.push(new Paragraph({
+                    children: [
+                        new ImageRun({
+                            data: imageBuffer,
+                            transformation: {
+                                width: 200, 
+                                height: 150, 
+                            },
+                        }),
+                    ],
+                    alignment: AlignmentType.CENTER,
+                    spacing: { after: 100 },
+                }));
+                 children.push(new Paragraph({
+                    children: [new TextRun({ text: `پیش‌نمایش فایل: ${festival.fileName || 'تصویر'}`, size: 9*2, font: fontName, rtl: true, italic: true })],
+                    alignment: AlignmentType.CENTER,
+                    spacing: { after: 100 },
+                 }));
+
+            } catch (imgError) {
+                console.warn("Could not embed image preview in DOCX:", festival.fileName, imgError);
+                addDetail("فایل اصلی", festival.fileName ? `${festival.fileName} (نوع: ${festival.fileType}) - تصویر قابل جاسازی نبود` : `(نوع: ${festival.fileType}) - تصویر قابل جاسازی نبود`);
+            }
+        } else if (festival.fileType === 'application/pdf') {
+             addDetail("فایل اصلی", festival.fileName ? `${festival.fileName} (نوع: PDF)` : `(نوع: PDF)`);
+        } else if (festival.fileType === 'text/plain') {
+            addDetail("ورودی متنی", festival.fileName ? `${festival.fileName}` : `فراخوان متنی`);
+        } else if (festival.sourceFiles && festival.sourceFiles.length > 1) {
+            addDetail("فایل‌های اصلی", `${festival.sourceFiles.length} تصویر (برای مشاهده به فایل ZIP مراجعه کنید)`);
+        }
+
+
+        children.push(new Paragraph({ text: "", spacing: { after: 250 } })); 
+      }
+
+      const doc = new Document({
+        creator: "Photo Contest Analyzer App",
+        title: reportTitleText,
+        description: `Report for ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]}`,
+        styles: {
+            paragraphStyles: [
+                {
+                    id: "common",
+                    name: "Common Paragraph",
+                    run: { font: fontName, size: defaultFontSize, rtl: true },
+                    paragraph: { alignment: AlignmentType.RIGHT, bidirectional: true },
+                },
+            ],
+        },
+        sections: [{
+          properties: {
+            page: {
+              margin: {
+                top: convertInchesToTwip(0.75),
+                right: convertInchesToTwip(0.75),
+                bottom: convertInchesToTwip(0.75),
+                left: convertInchesToTwip(0.75),
+              },
+               orientation: PageOrientation.PORTRAIT,
+            },
+          },
+          children: children,
+        }],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const reportFileName = `گزارش_فراخوان_${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth].replace(' ', '_')}_${today.jy}.docx`;
+      saveAs(blob, reportFileName);
+
+      setFileOpMessage({ type: 'success', text: `فایل Word گزارش با نام "${reportFileName}" با موفقیت ایجاد شد.`});
+    } catch (error) {
+      console.error("Error creating DOCX report:", error);
+      setFileOpMessage({ type: 'error', text: `خطا در ایجاد فایل Word: ${error instanceof Error ? error.message : String(error)}`});
+    } finally {
+      setIsGeneratingDocx(false);
+      setTimeout(() => setFileOpMessage(null), 5000);
     }
   };
 
@@ -579,25 +774,34 @@ export const FestivalList: React.FC = () => {
         </div>
       </div>
       
-      <div className="mb-6 p-4 bg-white rounded-lg shadow-md flex flex-col sm:flex-row gap-4 items-center justify-center">
+      <div className="mb-6 p-4 bg-white rounded-lg shadow-md flex flex-col sm:flex-row flex-wrap gap-3 items-center justify-center">
          <button
           onClick={handleExportReport}
-          disabled={!canExportReport || isZippingSources || fileOperationLoading}
-          className="w-full sm:w-auto px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-          title={!canExportReport ? "برای تهیه گزارش، یک ماه خاص با جشنواره‌های موجود انتخاب کنید" : `تهیه گزارش برای ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]}`}
+          disabled={!canExportReport || isZippingSources || fileOperationLoading || isGeneratingDocx}
+          className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
+          title={!canExportReport ? "برای تهیه گزارش HTML، یک ماه خاص با جشنواره‌های موجود انتخاب کنید" : `تهیه گزارش HTML برای ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]}`}
         >
-          تهیه گزارش {selectedShamsiMonth > 0 ? `(${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]})` : ''}
+          خروجی گزارش (HTML) {selectedShamsiMonth > 0 ? `(${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]})` : ''}
+        </button>
+        <button
+          onClick={handleExportDocxReport}
+          disabled={!canExportReport || isZippingSources || fileOperationLoading || isGeneratingDocx}
+          className="w-full sm:w-auto px-4 py-2.5 bg-sky-700 text-white font-semibold rounded-lg shadow-md hover:bg-sky-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm flex items-center justify-center"
+          title={!canExportReport ? "برای تهیه گزارش Word، یک ماه خاص با جشنواره‌های موجود انتخاب کنید" : (isGeneratingDocx ? "در حال آماده‌سازی فایل Word..." : `خروجی Word (.docx) برای ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]}`)}
+        >
+          {isGeneratingDocx ? <LoadingSpinner size="4" className="me-2"/> : <FileTextIcon size={16} className="me-2"/>}
+          {isGeneratingDocx ? "درحال ایجاد Word..." : `خروجی Word (.docx) ${selectedShamsiMonth > 0 ? `(${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]})` : ''}`}
         </button>
         <button
           onClick={handleExportSourceFilesZip}
-          disabled={!canExportSourceFilesZip || isZippingSources || fileOperationLoading}
-          className="w-full sm:w-auto px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+          disabled={!canExportSourceFilesZip || isZippingSources || fileOperationLoading || isGeneratingDocx}
+          className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center text-sm"
           title={!canExportSourceFilesZip ? "برای دانلود فایل‌های منبع، یک ماه خاص با جشنواره‌های موجود انتخاب کنید" : (isZippingSources ? "در حال آماده‌سازی فایل ZIP..." :`دانلود فایل‌های منبع ${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]}`)}
         >
           {isZippingSources ? (
-            <LoadingSpinner size="5" className="me-2" />
+            <LoadingSpinner size="4" className="me-2" />
           ) : (
-            <DownloadIconLucide size={18} className="me-2" />
+            <DownloadIconLucide size={16} className="me-2" />
           )}
           {isZippingSources ? "در حال ایجاد ZIP..." : `دانلود فایل‌های منبع ${selectedShamsiMonth > 0 ? `(${PERSIAN_MONTH_NAMES_WITH_ALL[selectedShamsiMonth]})` : ''}`}
         </button>
@@ -608,7 +812,7 @@ export const FestivalList: React.FC = () => {
           <>
             <button
               onClick={handleSaveDataToSystem}
-              disabled={fileOperationLoading || noDataToSave}
+              disabled={fileOperationLoading || noDataToSave || isZippingSources || isGeneratingDocx}
               className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
               title={noDataToSave ? "هیچ اطلاعاتی برای ذخیره وجود ندارد" : "ذخیره اطلاعات فراخوان‌ها روی سیستم"}
             >
@@ -618,7 +822,7 @@ export const FestivalList: React.FC = () => {
             </button>
             <button
               onClick={handleLoadDataFromSystem}
-              disabled={fileOperationLoading}
+              disabled={fileOperationLoading || isZippingSources || isGeneratingDocx}
               className="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
               title="بارگذاری اطلاعات فراخوان‌ها از فایل پشتیبان"
             >
@@ -631,7 +835,7 @@ export const FestivalList: React.FC = () => {
           <>
             <button
               onClick={handleDownloadBackupJson}
-              disabled={fileOperationLoading || noDataToSave}
+              disabled={fileOperationLoading || noDataToSave || isZippingSources || isGeneratingDocx}
               className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
               title={noDataToSave ? "هیچ اطلاعاتی برای دانلود وجود ندارد" : "دانلود فایل پشتیبان JSON اطلاعات فراخوان‌ها"}
             >
@@ -641,10 +845,10 @@ export const FestivalList: React.FC = () => {
             </button>
             <label
               htmlFor="upload-backup-input-list" 
-              className={`w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors flex items-center justify-center cursor-pointer ${fileOperationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`w-full sm:w-auto px-4 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition-colors flex items-center justify-center cursor-pointer ${(fileOperationLoading || isZippingSources || isGeneratingDocx) ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="بارگذاری پشتیبان از فایل JSON اطلاعات فراخوان‌ها"
             >
-               {fileOperationLoading && <LoadingSpinner size="5" className="me-2" />}
+               {(fileOperationLoading) && <LoadingSpinner size="5" className="me-2" />}
               <Upload size={18} className="me-2" />
               بارگذاری پشتیبان (JSON)
             </label>
@@ -655,7 +859,7 @@ export const FestivalList: React.FC = () => {
               className="hidden"
               accept=".json,application/json"
               onChange={handleUploadBackupJson}
-              disabled={fileOperationLoading}
+              disabled={fileOperationLoading || isZippingSources || isGeneratingDocx}
             />
           </>
         )}
